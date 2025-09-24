@@ -1,0 +1,258 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Nexa – Your Lead Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --brand:#004aad; --bg:#f7f8fa; --text:#0f172a; --muted:#64748b; --border:#e5e7eb; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; }
+    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    h1 { text-align: center; margin: 8px 0 20px; }
+    .card {
+      background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,.04);
+    }
+    .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; display: inline-block; }
+    .input, .btn, select, input[type="date"], input[type="time"] {
+      width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 16px;
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { background: var(--brand); color: #fff; border: none; cursor: pointer; font-weight: 600; }
+    .btn:hover { filter: brightness(.95); }
+    .note { color: var(--muted); font-size: 13px; margin-top: 6px; }
+    .mt-2{margin-top:10px} .mt-3{margin-top:16px}
+
+    /* Floating chat button */
+    #nexaBtn {
+      position: fixed; right: 24px; bottom: 24px; z-index: 9999;
+      border: none; border-radius: 999px; padding: 14px 18px;
+      background: var(--brand); color: #fff; font-weight: 700; cursor: pointer;
+      box-shadow: 0 12px 24px rgba(0,0,0,.2);
+    }
+    /* Chat panel */
+    #nexaChat {
+      position: fixed; right: 24px; bottom: 84px; width: 360px; height: 460px; z-index: 9999;
+      background:#fff; border:1px solid var(--border); border-radius: 14px; box-shadow: 0 16px 32px rgba(0,0,0,.2);
+      display: none; overflow: hidden;
+    }
+    #nexaHeader { background:#0f172a; color:#fff; padding:10px 12px; font-weight:700; display:flex; align-items:center; justify-content:space-between; }
+    #nexaLog { height: 330px; overflow-y:auto; padding:10px; background:#f8fafc; }
+    .nx-msg { max-width: 78%; padding:8px 12px; border-radius:12px; margin:8px 0; line-height:1.45; display:inline-block; clear:both; }
+    .nx-user { background:#d4f8d4; float:right; }
+    .nx-bot  { background:#e6edff; color:#003366; float:left; }
+    #nexaForm { display:flex; gap:6px; padding:10px; border-top:1px solid var(--border); }
+    #nexaInput { flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:8px; }
+    #nexaSend { padding:10px 12px; border:none; background: var(--brand); color:#fff; border-radius:8px; cursor:pointer; }
+    @media (max-width:600px){ #nexaChat{ right:12px; left:12px; width:auto; } .row{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Nexa – Your Lead Assistant</h1>
+
+    <div class="card">
+      <h2 style="margin:0 0 12px">Quick Lead Form</h2>
+
+      <label class="label" for="name">Name</label>
+      <input id="name" class="input" placeholder="Name" />
+
+      <div class="mt-2"></div>
+      <label class="label" for="phone">Phone</label>
+      <input id="phone" class="input" placeholder="Phone" />
+
+      <div class="mt-2"></div>
+      <label class="label" for="service">Service</label>
+      <input id="service" class="input" placeholder="Service" />
+
+      <div class="mt-2"></div>
+      <div class="row">
+        <div>
+          <label class="label" for="date">Date</label>
+          <input id="date" type="date" class="input">
+        </div>
+        <div>
+          <label class="label" for="time">Time</label>
+          <input id="time" type="time" step="900" class="input">
+        </div>
+      </div>
+
+      <div class="note mt-2">Working hours: 09:00–18:00</div>
+
+      <div class="mt-3"></div>
+      <button class="btn" onclick="saveLead()">Submit Lead</button>
+      <p id="status" class="note mt-2"></p>
+    </div>
+  </div>
+
+  <!-- Floating chat widget -->
+  <div id="nexaChat">
+    <div id="nexaHeader">
+      <span>Nexa Assistant</span>
+      <button id="nexaClose" style="background:transparent;border:none;color:#fff;font-size:16px;cursor:pointer">✕</button>
+    </div>
+    <div id="nexaLog"></div>
+    <div id="nexaForm">
+      <input id="nexaInput" type="text" placeholder="Type a message…" autocomplete="off">
+      <button id="nexaSend">Send</button>
+    </div>
+  </div>
+  <button id="nexaBtn">💬 Chat with Nexa</button>
+
+  <script>
+    // -------- Lead form submission --------
+    async function saveLead(){
+      const body = {
+        name: document.getElementById('name').value.trim(),
+        phone: document.getElementById('phone').value.trim(),
+        service: document.getElementById('service').value.trim(),
+        appointment_date: document.getElementById('date').value,  // YYYY-MM-DD
+        appointment_time: document.getElementById('time').value   // HH:MM
+      };
+      const status = document.getElementById('status');
+      status.textContent = '';
+      try{
+        const res = await fetch('/api/lead', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        status.textContent = data.message || data.detail || 'Saved.';
+      }catch(err){
+        status.textContent = 'Error: ' + (err.message || err);
+      }
+    }
+
+    // -------- Floating chat widget --------
+    const btn  = document.getElementById('nexaBtn');
+    const box  = document.getElementById('nexaChat');
+    const log  = document.getElementById('nexaLog');
+    const input= document.getElementById('nexaInput');
+    const send = document.getElementById('nexaSend');
+    const close= document.getElementById('nexaClose');
+    const history = [];
+
+    const formEls = {
+      name:   document.getElementById('name'),
+      phone:  document.getElementById('phone'),
+      service:document.getElementById('service'),
+      date:   document.getElementById('date'),
+      time:   document.getElementById('time'),
+    };
+
+    function addMsg(role, html){
+      const div=document.createElement('div');
+      div.className='nx-msg ' + (role==='user'?'nx-user':'nx-bot');
+      div.innerHTML=html;
+      log.appendChild(div);
+      log.scrollTop=log.scrollHeight;
+    }
+
+    function openChat(){
+      box.style.display='block';
+      if (!log.dataset.welcomed){
+        addMsg('bot',"👋 Hi! I'm <b>Nexa</b>. I can help you book an appointment. Tell me your name, phone, service, and a preferred date/time.");
+        log.dataset.welcomed = '1';
+      }
+      input.focus();
+    }
+    function closeChat(){ box.style.display='none'; }
+
+    btn.addEventListener('click',openChat);
+    close.addEventListener('click',closeChat);
+
+    // auto-fill helper from conversation
+    function tryAutofill(text){
+      const nameMatch = text.match(/\bname[:\-\s]+([A-ZА-Я][\w.\-\sА-Яа-я]+)\b/i);
+      if (nameMatch && formEls.name && !formEls.name.value) formEls.name.value = nameMatch[1].trim();
+
+      const phoneMatch = text.match(/(\+?\d[\d\s\-]{7,}\d)/);
+      if (phoneMatch && formEls.phone && !formEls.phone.value) formEls.phone.value = phoneMatch[1].replace(/\s+/g,'');
+
+      const svcMatch = text.match(/\b(service|услуга)[:\-\s]+([A-Za-zА-Яа-я0-9 \-_/]+)\b/i);
+      if (svcMatch && formEls.service && !formEls.service.value) formEls.service.value = svcMatch[2].trim();
+
+      const dateMatch = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+      if (dateMatch && formEls.date && !formEls.date.value) formEls.date.value = dateMatch[1];
+
+      const timeMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+      if (timeMatch && formEls.time && !formEls.time.value) {
+        const t = timeMatch[0];
+        formEls.time.value = (t.length===4 ? '0'+t : t);
+      }
+    }
+
+    async function sendMsg(){
+      const text = input.value.trim();
+      if(!text) return;
+      input.value = '';
+      addMsg('user', text);
+
+      try {
+        const res = await fetch('/api/chat', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ message: text, history })
+        });
+        if(!res.ok){
+          const t = await res.text(); throw new Error(t);
+        }
+        const data = await res.json();
+        addMsg('bot', data.reply);
+        history.push({role:'user', content:text});
+        history.push({role:'assistant', content:data.reply});
+        tryAutofill(text + "\n" + data.reply);
+      } catch(err){
+        addMsg('bot', 'Error: ' + (err.message || err));
+      }
+    }
+
+    send.addEventListener('click', sendMsg);
+    input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); sendMsg(); }});
+  </script>
+</body>
+</html>
+<script>
+btn.addEventListener('click',openChat);
+close.addEventListener('click',closeChat);
+// --- Proactive chat (open once per session) ---
+(function () {
+  const AUTO_DELAY_MS = 12000;           // 12s after load
+  const KEY = 'nexa_auto_opened_session';
+
+  function autoOpen() {
+    if (window.innerWidth < 600) return; // skip on very small screens
+    if (sessionStorage.getItem(KEY)) return;
+    if (box.style.display === 'block' || history.length > 0) return;
+
+    openChat();
+    sessionStorage.setItem(KEY, '1');
+
+    // Optional CTA button inside chat
+    setTimeout(() => {
+      const b = document.createElement('button');
+      b.textContent = 'Book now';
+      b.style.cssText = 'margin:6px 0 0; padding:6px 10px; border:none; background:#0ea5e9; color:#fff; border-radius:8px; cursor:pointer;';
+      b.onclick = () => {
+        closeChat();
+        document.getElementById('name')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('name')?.focus();
+      };
+      const wrap = document.createElement('div');
+      wrap.className = 'nx-msg nx-bot';
+      wrap.appendChild(b);
+      log.appendChild(wrap);
+      log.scrollTop = log.scrollHeight;
+    }, 800);
+  }
+
+  window.addEventListener('load', () => {
+    setTimeout(autoOpen, AUTO_DELAY_MS);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    if (e.clientY <= 0) autoOpen(); // exit-intent
+  });
+})();
+</script>
