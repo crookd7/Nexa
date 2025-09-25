@@ -37,6 +37,11 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 app.mount("/public", StaticFiles(directory="public", html=True), name="public")
+from fastapi.responses import RedirectResponse
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/public/index.html")
 
 # ------------------ MODELS ------------------
 class ChatRequest(BaseModel):
