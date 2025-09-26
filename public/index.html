@@ -113,10 +113,14 @@
       const status = document.getElementById('status');
       status.textContent = '';
       try{
-        const res = await fetch('/api/lead', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(body)
-        });
+      const res = await fetch('/api/lead', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Nexa-Key': 'YOUR_PUBLIC_CALL_KEY' // 👈 add this
+  },
+  body: JSON.stringify(body)
+});
         const data = await res.json();
         status.textContent = data.message || data.detail || 'Saved.';
       }catch(err){
@@ -190,10 +194,14 @@
       addMsg('user', text);
 
       try {
-        const res = await fetch('/api/chat', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ message: text, history })
+       const res = await fetch('/api/chat', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Nexa-Key': 'YOUR_PUBLIC_CALL_KEY' // 👈 add this line
+  },
+  body: JSON.stringify({ message: text, history })
+});
         });
         if(!res.ok){
           const t = await res.text(); throw new Error(t);
