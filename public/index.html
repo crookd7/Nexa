@@ -187,41 +187,41 @@
       }
     }
 
-    async function sendMsg(){
-      const text = input.value.trim();
-      if(!text) return;
-      input.value = '';
-      addMsg('user', text);
+   async function sendMsg(){
+  const text = input.value.trim();
+  if(!text) return;
+  input.value = '';
+  addMsg('user', text);
 
-      try {
-       const res = await fetch('/api/chat', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'X-Nexa-Key': '89ee71c2b83c9f90e0ba7a9bfa98eead'
-  },
-  body: JSON.stringify({ message: text, history })
-});
-        });
-        if(!res.ok){
-          const t = await res.text(); throw new Error(t);
-        }
-        const data = await res.json();
-        addMsg('bot', data.reply);
-        history.push({role:'user', content:text});
-        history.push({role:'assistant', content:data.reply});
-        tryAutofill(text + "\n" + data.reply);
-      } catch(err){
-        addMsg('bot', 'Error: ' + (err.message || err));
-      }
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Nexa-Key': '89ee71c2b83c9f90e0ba7a9bfa98eead'
+      },
+      body: JSON.stringify({ message: text, history })
+    });
+
+    if(!res.ok){
+      const t = await res.text(); throw new Error(t);
     }
+
+    const data = await res.json();
+    addMsg('bot', data.reply);
+    history.push({role:'user', content:text});
+    history.push({role:'assistant', content:data.reply});
+    tryAutofill(text + "\n" + data.reply);
+  } catch(err){
+    addMsg('bot', 'Error: ' + (err.message || err));
+  }
+}
 
     send.addEventListener('click', sendMsg);
     input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); sendMsg(); }});
   </script>
 </body>
 </html>
-<script>
 btn.addEventListener('click',openChat);
 close.addEventListener('click',closeChat);
 // --- Proactive chat (open once per session) ---
