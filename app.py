@@ -1,4 +1,4 @@
-import os, csv, smtplib
+import os, csv, smtplib, ssl
 from typing import List, Dict, Optional
 from email.message import EmailMessage
 from datetime import datetime, timedelta
@@ -179,14 +179,15 @@ END:VCALENDAR
             print(f"⚠ Failed to generate calendar invite: {e}")
 
     # Send
-    try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.send_message(msg)
-            print("✅ Lead email sent successfully.")
-    except Exception as e:
-        print(f"⚠ Email send failed: {e}")
+try:
+    context = ssl.create_default_context()
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+        server.starttls(context=context)  # ✅ secure TLS with context
+        server.login(SMTP_USER, SMTP_PASS)
+        server.send_message(msg)
+        print("✅ Lead email sent successfully.")
+except Exception as e:
+    print(f"⚠ Email send failed: {e}")
 
 # ------------------ SAVE LEAD ------------------
 @app.post("/api/lead")
