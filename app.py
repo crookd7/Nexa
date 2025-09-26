@@ -3,22 +3,21 @@ from typing import List, Dict, Optional
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# ------------------ ENV & CLIENTS ------------------
+# ------------------ ENV ------------------
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY missing")
-
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+CHAT_ENABLED = client is not None
 
 # SMTP / Email
 SMTP_HOST  = os.getenv("SMTP_HOST")
@@ -28,20 +27,31 @@ SMTP_PASS  = os.getenv("SMTP_PASS")
 SMTP_FROM  = os.getenv("SMTP_FROM", SMTP_USER or "")
 NOTIFY_TO  = os.getenv("NOTIFY_TO")
 
+# API auth
+NEXA_SERVER_KEY = os.getenv("NEXA_SERVER_KEY")  # set this in Render
+ALLOWED_ORIGINS = ["https://nexa-p6nu.onrender.com"]  # add your custom domain later
+
 LEADS_CSV = "leads.csv"
 
-# ------------------ FASTAPI APP ------------------
+# ------------------ APP ------------------
 app = FastAPI(title="Nexa LeadGenBot")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["POST", "GET"],
+    allow_headers=["Content-Type", "X-Nexa-Key"],
 )
+
 app.mount("/public", StaticFiles(directory="public", html=True), name="public")
-from fastapi.responses import RedirectResponse
 
 @app.get("/")
 def root():
     return RedirectResponse(url="/public/index.html")
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 # ------------------ MODELS ------------------
 class ChatRequest(BaseModel):
@@ -59,9 +69,20 @@ class Lead(BaseModel):
     appointment_date: Optional[str] = None  # YYYY-MM-DD
     appointment_time: Optional[str] = None  # HH:MM
 
+# ------------------ GUARD ------------------
+def guard(x_nexa_key: str = Header(None)):
+    if not NEXA_SERVER_KEY:
+        raise HTTPException(status_code=500, detail="Server key not configured")
+    if x_nexa_key != NEXA_SERVER_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
 # ------------------ CHAT ------------------
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, _: None = guard()):
+    if not CHAT_ENABLED:
+        return ChatResponse(
+            reply="Nexa chat is temporarily unavailable. You can still submit the form and we’ll contact you ASAP."
+        )
     system = (
         "You are Nexa, a friendly lead-generation assistant for a local business. "
         "Introduce yourself as Nexa. Ask for name, phone, service, and a specific date/time. "
@@ -78,16 +99,16 @@ def chat(req: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-# ------------------ EMAIL + ICS ------------------
+# ------------------ EMAIL ------------------
 def send_lead_email(lead: Lead):
-    """Sends an HTML email; attaches .ics if appointment_date & time provided."""
+    """Send HTML email; attach .ics when date/time provided."""
     if not (SMTP_HOST and SMTP_USER and SMTP_PASS and NOTIFY_TO):
         print("⚠ Email settings not configured; skipping email send.")
         return
 
     msg = EmailMessage()
 
-    # Subject like: "🟢 New lead: John — Haircut (2025-09-25 15:00)"
+    # Subject: "🟢 New lead: John — Haircut (2025-09-25 15:00)"
     subject_parts = [f"🟢 New lead: {lead.name}"]
     if lead.service:
         subject_parts.append(f"— {lead.service}")
@@ -125,7 +146,7 @@ def send_lead_email(lead: Lead):
     """
     msg.add_alternative(html, subtype="html")
 
-    # Optional: attach calendar invite (1 hour duration) if date/time provided
+    # Attach calendar invite (1h) if date/time provided
     if lead.appointment_date and lead.appointment_time:
         try:
             start_dt = datetime.strptime(
@@ -169,7 +190,7 @@ END:VCALENDAR
 
 # ------------------ SAVE LEAD ------------------
 @app.post("/api/lead")
-def save_lead(lead: Lead):
+def save_lead(lead: Lead, _: None = guard()):
     file_exists = os.path.exists(LEADS_CSV)
     try:
         with open(LEADS_CSV, "a", newline="", encoding="utf-8") as f:
@@ -188,24 +209,23 @@ def save_lead(lead: Lead):
                 lead.appointment_time or ""
             ])
 
-        # email notification
         send_lead_email(lead)
         return {"ok": True, "message": "Lead saved."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed: {e}")
 
-# ------------------ TEST EMAIL ------------------
+# ------------------ TEST EMAIL (optional) ------------------
 @app.get("/api/test-email")
 def test_email():
-    dummy = Lead(
-        name="Test User",
-        phone="+359888000111",
-        service="Test Service",
-        appointment_date=datetime.now().strftime("%Y-%m-%d"),
-        appointment_time="15:00",
-    )
     try:
+        dummy = Lead(
+            name="Test User",
+            phone="+359888000111",
+            service="Test Service",
+            appointment_date=datetime.now().strftime("%Y-%m-%d"),
+            appointment_time="15:00",
+        )
         send_lead_email(dummy)
-        return {"ok": True, "message": "Test email sent."}
+        return JSONResponse(content={"ok": True, "message": "Test email sent."})
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
