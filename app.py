@@ -25,7 +25,7 @@ SMTP_HOST  = os.getenv("smtp-relay.brevo.com")
 SMTP_PORT  = int(os.getenv("587"))
 SMTP_USER  = os.getenv("979923001@smtp-brevo.com")
 SMTP_PASS  = os.getenv("S8TML059SnmAGwDZ4")
-SMTP_FROM  = os.getenv("Syachevs@yahoo.com") or (SMTP_USER or "")
+SMTP_FROM  = os.getenv("yachevs@yahoo.com") or (SMTP_USER or "")
 NOTIFY_TO  = os.getenv("yachevs@yahoo.com")
 
 # API auth
