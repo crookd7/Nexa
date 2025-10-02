@@ -14,22 +14,21 @@ from openai import OpenAI
 # ------------------ ENV ------------------
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("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
-")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 CHAT_ENABLED = client is not None
 
 # SMTP / Email
-SMTP_HOST  = os.getenv("smtp-relay.brevo.com")
-SMTP_PORT  = int(os.getenv("587"))
-SMTP_USER  = os.getenv("979923001@smtp-brevo.com")
-SMTP_PASS  = os.getenv("S8TML059SnmAGwDZ4")
-SMTP_FROM  = os.getenv("yachevs@yahoo.com") or (SMTP_USER or "")
-NOTIFY_TO  = os.getenv("yachevs@yahoo.com")
+SMTP_HOST  = os.getenv("SMTP_HOST")
+SMTP_PORT  = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER  = os.getenv("SMTP_USER")
+SMTP_PASS  = os.getenv("SMTP_PASS")
+SMTP_FROM  = os.getenv("SMTP_FROM") or (SMTP_USER or "")
+NOTIFY_TO  = os.getenv("NOTIFY_TO")
 
 # API auth
-NEXA_SERVER_KEY = os.getenv("89ee71c2b83c9f90e0ba7a9bfa98eead")  # set in Render
+NEXA_SERVER_KEY = os.getenv("NEXA_SERVER_KEY")  # set in Render
 ALLOWED_ORIGINS = ["https://nexa-p6nu.onrender.com"]  # add your custom domain later
 
 LEADS_CSV = "leads.csv"
