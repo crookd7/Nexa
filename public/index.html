@@ -36,9 +36,7 @@
       transform:translateX(100%); transition:transform .25s ease; display:flex; flex-direction:column;
     }
     #adminPanel.open{ transform:translateX(0); }
-    #adminHeader{
-      padding:12px 14px; background:#0f172a; color:#fff; display:flex; align-items:center; justify-content:space-between;
-    }
+    #adminHeader{ padding:12px 14px; background:#0f172a; color:#fff; display:flex; align-items:center; justify-content:space-between; }
     #adminBody{ padding:12px; overflow:auto; flex:1; }
     .adm-input{ width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; margin:6px 0; }
     .adm-actions .btn{ padding:8px 10px; border-radius:6px; font-size:14px; }
@@ -137,10 +135,12 @@
   </div>
 
   <script>
-    // ====== Booking form config ======
+    // ====== CONFIG ======
+    // Must exactly match NEXA_SERVER_KEY in Render env
+    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead";
     const TIME_STEP_MIN = 15;
 
-    // ====== Booking form helpers ======
+    // ====== Booking helpers ======
     function toMinutes(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
     function pad2(n){ return (n<10?'0':'')+n; }
     function minutesToHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${pad2(h)}:${pad2(m)}`; }
@@ -176,7 +176,7 @@
       const open = data?.hours?.open || "09:00";
       const close = data?.hours?.close || "18:00";
       const confirmed = Array.isArray(data?.taken) ? data.taken : [];
-      const pending   = Array.isArray(data?.pending) ? data.pending : []; // backend may add later
+      const pending   = Array.isArray(data?.pending) ? data.pending : [];
       buildTimeOptions(open, close, confirmed, pending);
       showTakenPills(confirmed, pending);
     }
@@ -194,7 +194,10 @@
       try{
         const res = await fetch('/api/lead', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Nexa-Key': NEXA_KEY          // ← REQUIRED for /api/lead
+          },
           body: JSON.stringify(body)
         });
         const raw = await res.text(); let data; try{ data = JSON.parse(raw) } catch{ data = { detail: raw } }
@@ -234,7 +237,7 @@
     openBtn.addEventListener('click', ()=> { panel.classList.add('open'); checkSessionAndRender(); });
     closeBtn.addEventListener('click', ()=> panel.classList.remove('open'));
 
-    // Login flow (uses session cookie from server)
+    // Login (session cookie)
     document.getElementById('admLoginBtn').addEventListener('click', async ()=>{
       const u = document.getElementById('admUser').value.trim();
       const p = document.getElementById('admPass').value;
@@ -244,7 +247,6 @@
       form.append("password", p);
       const res = await fetch('/admin/login', { method:'POST', body: form, credentials: 'include', redirect: 'follow' });
       if (res.redirected || res.ok) {
-        // Cookie set; show dashboard
         loginView.style.display = 'none';
         dashView.style.display = 'block';
         logoutBtn.style.display = 'inline-block';
@@ -263,7 +265,6 @@
     });
 
     async function checkSessionAndRender(){
-      // Try hitting a protected endpoint; if 200 → logged in
       const res = await fetch('/api/leads', { credentials:'include' });
       if (res.ok) {
         loginView.style.display = 'none';
@@ -285,10 +286,8 @@
       const tbody = document.querySelector("#leadsTable tbody");
       tbody.innerHTML = "";
       const filter = document.getElementById('filterDate').value;
-
       const leads = data.leads.filter(l => !filter || l.appointment_date === filter);
 
-      // counts
       const cPending = leads.filter(l=>l.status==='pending').length;
       const cConfirmed = leads.filter(l=>l.status==='confirmed').length;
       const cCancelled = leads.filter(l=>l.status==='cancelled').length;
@@ -329,7 +328,6 @@
       const data = await res.json();
       alert(data.message || "Updated");
       loadLeads();
-      // refresh availability if same date visible
       const d = document.getElementById('date').value;
       if (d) fetchAvailability(d);
     }
