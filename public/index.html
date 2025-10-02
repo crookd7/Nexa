@@ -1,44 +1,30 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Nexa – Your Lead Assistant</title>
+  <meta charset="utf-8" />
+  <title>Nexa – Lead & Booking</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --brand:#004aad; --bg:#f7f8fa; --text:#0f172a; --muted:#64748b; --border:#e5e7eb; }
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; }
-    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px 140px; }
-    h1 { text-align: center; margin: 8px 0 20px; }
-    .card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 4px 16px rgba(0,0,0,.04); }
-    .label { font-size:12px; color:var(--muted); margin-bottom:6px; display:inline-block; }
-    .input, .btn, select, input[type="date"], input[type="time"] { width:100%; padding:12px; border-radius:10px; border:1px solid #cbd5e1; font-size:16px; }
-    .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    .btn { background:var(--brand); color:#fff; border:none; cursor:pointer; font-weight:600; }
-    .btn:hover { filter:brightness(.95); }
-    .note { color:var(--muted); font-size:13px; margin-top:6px; }
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0}
+    .container{max-width:900px;margin:24px auto;padding:0 16px 120px}
+    h1{margin:8px 0 20px;text-align:center}
+    .card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
+    .label{font-size:12px;color:var(--muted);margin-bottom:6px;display:inline-block}
+    .input, select, .btn{width:100%;padding:12px;border-radius:10px;border:1px solid #cbd5e1;font-size:16px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .btn{background:var(--brand);color:#fff;border:none;cursor:pointer;font-weight:600}
+    .btn:hover{filter:brightness(.95)}
+    .note{color:var(--muted);font-size:13px;margin-top:6px}
     .mt-2{margin-top:10px} .mt-3{margin-top:16px}
-
-    /* Floating chat */
-    #nexaBtn { position:fixed; right:24px; bottom:24px; z-index:9999; border:none; border-radius:999px; padding:14px 18px;
-      background:var(--brand); color:#fff; font-weight:700; cursor:pointer; box-shadow:0 12px 24px rgba(0,0,0,.2);}
-    #nexaChat { position:fixed; right:24px; bottom:84px; width:360px; height:460px; z-index:9999; background:#fff; border:1px solid var(--border);
-      border-radius:14px; box-shadow:0 16px 32px rgba(0,0,0,.2); display:none; overflow:hidden;}
-    #nexaHeader { background:#0f172a; color:#fff; padding:10px 12px; font-weight:700; display:flex; align-items:center; justify-content:space-between; }
-    #nexaLog { height:330px; overflow-y:auto; padding:10px; background:#f8fafc; }
-    .nx-msg { max-width:78%; padding:8px 12px; border-radius:12px; margin:8px 0; line-height:1.45; display:inline-block; clear:both; }
-    .nx-user { background:#d4f8d4; float:right; }
-    .nx-bot  { background:#e6edff; color:#003366; float:left; }
-    #nexaForm { display:flex; gap:6px; padding:10px; border-top:1px solid var(--border); }
-    #nexaInput { flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:8px; }
-    #nexaSend { padding:10px 12px; border:none; background:var(--brand); color:#fff; border-radius:8px; cursor:pointer; }
-    @media (max-width:600px){ #nexaChat{ right:12px; left:12px; width:auto; } .row{grid-template-columns:1fr;} }
+    .pill{display:inline-block;background:#eef2ff;color:#1e3a8a;border-radius:999px;padding:2px 8px;font-size:12px;margin:2px}
+    @media (max-width:640px){ .row{grid-template-columns:1fr} }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Nexa – Your Lead Assistant</h1>
-
+    <h1>Nexa – Book an Appointment</h1>
     <div class="card">
       <h2 style="margin:0 0 12px">Quick Lead Form</h2>
 
@@ -57,43 +43,75 @@
       <div class="row">
         <div>
           <label class="label" for="date">Date</label>
-          <input id="date" type="date" class="input">
+          <input id="date" type="date" class="input" />
         </div>
         <div>
-          <label class="label" for="time">Time</label>
-          <input id="time" type="time" step="900" class="input">
+          <label class="label" for="time">Time (available only)</label>
+          <select id="time"></select>
+          <div id="takenList" class="note" style="min-height:18px;margin-top:6px;"></div>
         </div>
       </div>
 
-      <div class="note mt-2">Working hours: 09:00–18:00</div>
+      <div class="note mt-2">Working hours shown are based on server availability. Booked slots are disabled.</div>
 
       <div class="mt-3"></div>
-      <button class="btn" id="submitLead" type="button">Submit Lead</button>
+      <button class="btn" id="submitLead" type="button">Submit</button>
       <p id="status" class="note mt-2"></p>
     </div>
   </div>
 
-  <!-- Floating chat widget -->
-  <div id="nexaChat">
-    <div id="nexaHeader">
-      <span>Nexa Assistant</span>
-      <button id="nexaClose" style="background:transparent;border:none;color:#fff;font-size:16px;cursor:pointer">✕</button>
-    </div>
-    <div id="nexaLog"></div>
-    <div id="nexaForm">
-      <input id="nexaInput" type="text" placeholder="Type a message…" autocomplete="off">
-      <button id="nexaSend">Send</button>
-    </div>
-  </div>
-  <button id="nexaBtn">💬 Chat with Nexa</button>
-
   <script>
-    // === CONFIG ===
-    // NOTE: Keeping the header for now to match your server guard. (Later we can replace with hCaptcha/CSRF.)
-    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; /* :contentReference[oaicite:3]{index=3} */
+    // ===== Config =====
+    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match NEXA_SERVER_KEY on server
+    const TIME_STEP_MIN = 15; // minutes per slot
 
-    // -------- Lead form submission --------
+    // ===== Helpers =====
+    function toMinutes(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
+    function pad2(n){ return (n<10?'0':'')+n; }
+    function minutesToHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${pad2(h)}:${pad2(m)}`; }
+
+    function buildTimeOptions(open, close, taken=[]) {
+      const sel = document.getElementById('time');
+      sel.innerHTML = "";
+      const openM = toMinutes(open), closeM = toMinutes(close);
+      for (let m = openM; m <= closeM; m += TIME_STEP_MIN) {
+        const t = minutesToHHMM(m);
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        // disable if taken
+        if (taken.includes(t)) { opt.disabled = true; opt.textContent = `${t} (booked)`; }
+        sel.appendChild(opt);
+      }
+      // preselect first non-disabled
+      const firstFree = Array.from(sel.options).find(o => !o.disabled);
+      if (firstFree) sel.value = firstFree.value;
+    }
+
+    function showTakenPills(taken) {
+      const box = document.getElementById('takenList');
+      if (!taken || !taken.length) { box.textContent = ""; return; }
+      box.innerHTML = "Taken: " + taken.map(t => `<span class="pill">${t}</span>`).join(" ");
+    }
+
+    async function fetchAvailability(dateStr){
+      if (!dateStr) return;
+      const res = await fetch(`/api/availability?date=${encodeURIComponent(dateStr)}`, {
+        headers: { 'X-Nexa-Key': NEXA_KEY }
+      });
+      const data = await res.json();
+      // Use hours from server to build slots (keeps UI in sync)
+      const open = data?.hours?.open || "09:00";
+      const close = data?.hours?.close || "18:00";
+      const taken = Array.isArray(data?.taken) ? data.taken : [];
+      buildTimeOptions(open, close, taken);
+      showTakenPills(taken);
+    }
+
+    // ===== Form submission =====
     async function saveLead(){
+      const status = document.getElementById('status');
+      status.textContent = "";
       const body = {
         name: document.getElementById('name').value.trim(),
         phone: document.getElementById('phone').value.trim(),
@@ -101,130 +119,57 @@
         appointment_date: document.getElementById('date').value,
         appointment_time: document.getElementById('time').value
       };
-      const status = document.getElementById('status');
-      status.textContent = '';
       try{
         const res = await fetch('/api/lead', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Nexa-Key': NEXA_KEY
-          },
+          headers: { 'Content-Type': 'application/json', 'X-Nexa-Key': NEXA_KEY },
           body: JSON.stringify(body)
         });
-        const data = await res.json().catch(()=>({}));
-        if(!res.ok) throw new Error(data.detail || 'Submit failed');
-        status.textContent = data.message || 'Saved.';
-      }catch(err){
-        status.textContent = 'Error: ' + (err.message || err);
-      }
-    }
-    document.getElementById('submitLead')?.addEventListener('click', saveLead);
+        const raw = await res.text();
+        let data; try{ data = JSON.parse(raw) } catch{ data = { detail: raw } }
 
-    // -------- Floating chat widget --------
-    const btn  = document.getElementById('nexaBtn');
-    const box  = document.getElementById('nexaChat');
-    const log  = document.getElementById('nexaLog');
-    const input= document.getElementById('nexaInput');
-    const send = document.getElementById('nexaSend');
-    const close= document.getElementById('nexaClose');
-    const history = [];
-
-    const formEls = {
-      name:   document.getElementById('name'),
-      phone:  document.getElementById('phone'),
-      service:document.getElementById('service'),
-      date:   document.getElementById('date'),
-      time:   document.getElementById('time'),
-    };
-
-    function addMsg(role, html){
-      const div=document.createElement('div');
-      div.className='nx-msg ' + (role==='user'?'nx-user':'nx-bot');
-      div.innerHTML=html;
-      log.appendChild(div);
-      log.scrollTop=log.scrollHeight;
-    }
-
-    function openChat(){
-      box.style.display='block';
-      if (!log.dataset.welcomed){
-        addMsg('bot',"👋 Hi! I'm <b>Nexa</b>. I can help you book an appointment. Tell me your name, phone, service, and a preferred date/time.");
-        log.dataset.welcomed = '1';
-      }
-      input.focus();
-    }
-    function closeChat(){ box.style.display='none'; }
-
-    btn.addEventListener('click',openChat);
-    close.addEventListener('click',closeChat);
-
-    // auto-fill helper from conversation
-    function tryAutofill(text){
-      const nameMatch = text.match(/\bname[:\-\s]+([A-ZА-Я][\w.\-\sА-Яа-я]+)\b/i);
-      if (nameMatch && formEls.name && !formEls.name.value) formEls.name.value = nameMatch[1].trim();
-
-      const phoneMatch = text.match(/(\+?\d[\d\s\-]{7,}\d)/);
-      if (phoneMatch && formEls.phone && !formEls.phone.value) formEls.phone.value = phoneMatch[1].replace(/\s+/g,'');
-
-      const svcMatch = text.match(/\b(service|услуга)[:\-\s]+([A-Za-zА-Яа-я0-9 \-_/]+)\b/i);
-      if (svcMatch && formEls.service && !formEls.service.value) formEls.service.value = svcMatch[2].trim();
-
-      const dateMatch = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
-      if (dateMatch && formEls.date && !formEls.date.value) formEls.date.value = dateMatch[1];
-
-      const timeMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
-      if (timeMatch && formEls.time && !formEls.time.value) {
-        const t = timeMatch[0];
-        formEls.time.value = (t.length===4 ? '0'+t : t);
-      }
-    }
-
-    async function sendMsg(){
-      const text = input.value.trim();
-      if(!text) return;
-      input.value = '';
-      addMsg('user', text);
-
-      try{
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Nexa-Key': NEXA_KEY
-          },
-          body: JSON.stringify({ message: text, history })
-        });
-        if(!res.ok){
-          const t = await res.text(); throw new Error(t);
+        if (!res.ok) {
+          if (res.status === 409) {
+            // conflict - refresh availability and show message
+            const taken = Array.isArray(data?.taken) ? data.taken : [];
+            await fetchAvailability(body.appointment_date);
+            status.textContent = data.message || "That slot is already booked. Please choose another time.";
+            return;
+          }
+          const msg = Array.isArray(data?.detail)
+            ? data.detail.map(d => d.msg).join('; ')
+            : (data?.detail || data?.error || 'Submit failed');
+          throw new Error(msg);
         }
-        const data = await res.json();
-        addMsg('bot', data.reply);
-        history.push({role:'user', content:text});
-        history.push({role:'assistant', content:data.reply});
-        tryAutofill(text + "\n" + data.reply);
+
+        status.textContent = data.message || "Saved. We’ll contact you to confirm.";
+        // Optional: clear form after success
+        // document.getElementById('name').value = "";
+        // document.getElementById('phone').value = "";
+        // document.getElementById('service').value = "";
       }catch(err){
-        addMsg('bot', 'Error: ' + (err.message || err));
+        status.textContent = "Error: " + (err.message || String(err));
       }
     }
 
-    send.addEventListener('click', sendMsg);
-    input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); sendMsg(); }});
-
-    // Proactive chat (open once per session)
-    (function () {
-      const AUTO_DELAY_MS = 12000;
-      const KEY = 'nexa_auto_opened_session';
-      function autoOpen() {
-        if (window.innerWidth < 600) return;
-        if (sessionStorage.getItem(KEY)) return;
-        if (box.style.display === 'block' || history.length > 0) return;
-        openChat();
-        sessionStorage.setItem(KEY, '1');
+    // ===== Init =====
+    function setDefaultDateToday(){
+      const d = document.getElementById('date');
+      if (!d.value) {
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = pad2(today.getMonth()+1);
+        const dd = pad2(today.getDate());
+        d.value = `${yyyy}-${mm}-${dd}`;
       }
-      window.addEventListener('load', () => { setTimeout(autoOpen, AUTO_DELAY_MS); });
-      document.addEventListener('mouseout', (e) => { if (e.clientY <= 0) autoOpen(); });
-    })();
+    }
+
+    document.getElementById('submitLead')?.addEventListener('click', saveLead);
+    document.getElementById('date')?.addEventListener('change', (e)=> fetchAvailability(e.target.value));
+
+    // on first load: set date to today and fetch availability
+    setDefaultDateToday();
+    fetchAvailability(document.getElementById('date').value);
   </script>
 </body>
 </html>
