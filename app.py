@@ -28,7 +28,7 @@ SMTP_FROM  = os.getenv("SMTP_FROM") or (SMTP_USER or "")
 NOTIFY_TO  = os.getenv("NOTIFY_TO")
 
 # API auth
-NEXA_SERVER_KEY = os.getenv("89ee71c2b83c9f90e0ba7a9bfa98eead")  # set in Render
+NEXA_SERVER_KEY = os.getenv("NEXA_SERVER_KEY")  # set in Render
 ALLOWED_ORIGINS = ["https://nexa-p6nu.onrender.com"]  # add your custom domain later
 
 LEADS_CSV = "leads.csv"
