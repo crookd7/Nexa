@@ -19,12 +19,41 @@
     .note{color:var(--muted);font-size:13px;margin-top:6px}
     .mt-2{margin-top:10px} .mt-3{margin-top:16px}
     .pill{display:inline-block;border-radius:999px;padding:2px 8px;font-size:12px;margin:2px}
-    .pill-confirmed{background:#fee2e2;color:#991b1b} /* red-ish */
-    .pill-pending{background:#f1f5f9;color:#475569}   /* gray */
-    @media (max-width:640px){ .row{grid-template-columns:1fr} }
+    .pill-confirmed{background:#fee2e2;color:#991b1b}
+    .pill-pending{background:#f1f5f9;color:#475569}
+
+    /* Floating Admin button */
+    #adminBtn{
+      position:fixed; top:12px; right:12px; z-index:9999;
+      background:#334155; color:#fff; border:none; border-radius:8px; padding:8px 10px; font-size:13px; cursor:pointer; opacity:.85;
+    }
+    #adminBtn:hover{opacity:1}
+
+    /* Slide-over Admin Panel */
+    #adminPanel{
+      position:fixed; top:0; right:0; width:420px; max-width:95vw; height:100vh; z-index:9998;
+      background:#fff; border-left:1px solid var(--border); box-shadow:-20px 0 40px rgba(0,0,0,.15);
+      transform:translateX(100%); transition:transform .25s ease; display:flex; flex-direction:column;
+    }
+    #adminPanel.open{ transform:translateX(0); }
+    #adminHeader{
+      padding:12px 14px; background:#0f172a; color:#fff; display:flex; align-items:center; justify-content:space-between;
+    }
+    #adminBody{ padding:12px; overflow:auto; flex:1; }
+    .adm-input{ width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; margin:6px 0; }
+    .adm-actions .btn{ padding:8px 10px; border-radius:6px; font-size:14px; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th, td { border:1px solid #e2e8f0; padding:8px; text-align:left; font-size:14px; }
+    th { background:#f1f5f9; position:sticky; top:0; }
+    .btn.small{ padding:6px 8px; font-size:12px; border-radius:6px; }
+    .btn.confirm{ background:#16a34a; }
+    .btn.cancel{ background:#ef4444; }
   </style>
 </head>
 <body>
+  <!-- Public page content -->
+  <button id="adminBtn">🔑 Admin</button>
+
   <div class="container">
     <h1>Nexa – Book an Appointment</h1>
     <div class="card">
@@ -64,64 +93,90 @@
     </div>
   </div>
 
+  <!-- Slide-over Admin Panel -->
+  <div id="adminPanel" aria-hidden="true">
+    <div id="adminHeader">
+      <strong>Admin</strong>
+      <div>
+        <button id="logoutBtn" class="btn small cancel" style="display:none">Logout</button>
+        <button id="closeAdmin" class="btn small" style="background:#475569">Close ✕</button>
+      </div>
+    </div>
+    <div id="adminBody">
+      <!-- Login form (shown if no session) -->
+      <div id="loginView">
+        <h3 style="margin:6px 0 6px">Login</h3>
+        <input id="admUser" class="adm-input" placeholder="Username" autocomplete="username" />
+        <input id="admPass" class="adm-input" type="password" placeholder="Password" autocomplete="current-password" />
+        <div class="adm-actions">
+          <button id="admLoginBtn" class="btn">Login</button>
+        </div>
+        <p id="admMsg" class="note"></p>
+      </div>
+
+      <!-- Dashboard (shown after login) -->
+      <div id="dashView" style="display:none">
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <label class="label" for="filterDate" style="margin:0">Filter by date</label>
+          <input id="filterDate" type="date" class="adm-input" style="max-width:180px; margin:0" />
+          <button id="refreshBtn" class="btn small" style="background:#0ea5e9">Refresh</button>
+        </div>
+        <div id="countInfo" class="note"></div>
+        <table id="leadsTable">
+          <thead>
+            <tr>
+              <th>Status</th><th>Name</th><th>Phone</th><th>Service</th>
+              <th>Date</th><th>Time</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="dashMsg" class="note"></p>
+      </div>
+    </div>
+  </div>
+
   <script>
-    // ===== Config =====
-    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match server
+    // ====== Booking form config ======
     const TIME_STEP_MIN = 15;
 
-    // ===== Helpers =====
+    // ====== Booking form helpers ======
     function toMinutes(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
     function pad2(n){ return (n<10?'0':'')+n; }
     function minutesToHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${pad2(h)}:${pad2(m)}`; }
 
-    function buildTimeOptions(open, close, confirmed=[], pending=[]) {
+    function buildTimeOptions(open, close, confirmed=[], pending=[]){
       const sel = document.getElementById('time');
       sel.innerHTML = "";
       const openM = toMinutes(open), closeM = toMinutes(close);
-      for (let m = openM; m <= closeM; m += TIME_STEP_MIN) {
+      for (let m=openM; m<=closeM; m+=TIME_STEP_MIN){
         const t = minutesToHHMM(m);
         const opt = document.createElement('option');
         opt.value = t;
-        if (confirmed.includes(t)) {
-          opt.disabled = true;
-          opt.textContent = `${t} (confirmed)`;
-        } else if (pending.includes(t)) {
-          opt.textContent = `${t} (pending)`;
-          opt.style.color = "#64748b"; // gray text
-        } else {
-          opt.textContent = t;
-        }
+        if (confirmed.includes(t)) { opt.disabled = true; opt.textContent = `${t} (confirmed)`; }
+        else if (pending.includes(t)) { opt.textContent = `${t} (pending)`; opt.style.color = "#64748b"; }
+        else { opt.textContent = t; }
         sel.appendChild(opt);
       }
       const firstFree = Array.from(sel.options).find(o => !o.disabled);
       if (firstFree) sel.value = firstFree.value;
     }
 
-    function showTakenPills(confirmed, pending) {
+    function showTakenPills(confirmed, pending){
       const box = document.getElementById('takenList');
       const pills = [];
-      if (confirmed.length) {
-        pills.push("Confirmed: " + confirmed.map(t => `<span class="pill pill-confirmed">${t}</span>`).join(" "));
-      }
-      if (pending.length) {
-        pills.push("Pending: " + pending.map(t => `<span class="pill pill-pending">${t}</span>`).join(" "));
-      }
+      if (confirmed.length) pills.push("Confirmed: " + confirmed.map(t=>`<span class="pill pill-confirmed">${t}</span>`).join(" "));
+      if (pending.length) pills.push("Pending: " + pending.map(t=>`<span class="pill pill-pending">${t}</span>`).join(" "));
       box.innerHTML = pills.join("<br/>");
     }
 
     async function fetchAvailability(dateStr){
-      if (!dateStr) return;
-      const res = await fetch(`/api/availability?date=${encodeURIComponent(dateStr)}`, {
-        headers: { 'X-Nexa-Key': NEXA_KEY }
-      });
+      const res = await fetch(`/api/availability?date=${encodeURIComponent(dateStr)}`);
       const data = await res.json();
       const open = data?.hours?.open || "09:00";
       const close = data?.hours?.close || "18:00";
-
-      // new: confirmed vs pending arrays
       const confirmed = Array.isArray(data?.taken) ? data.taken : [];
-      const pending   = Array.isArray(data?.pending) ? data.pending : [];
-
+      const pending   = Array.isArray(data?.pending) ? data.pending : []; // backend may add later
       buildTimeOptions(open, close, confirmed, pending);
       showTakenPills(confirmed, pending);
     }
@@ -139,11 +194,18 @@
       try{
         const res = await fetch('/api/lead', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Nexa-Key': NEXA_KEY },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Submit failed");
+        const raw = await res.text(); let data; try{ data = JSON.parse(raw) } catch{ data = { detail: raw } }
+        if (!res.ok) {
+          if (res.status === 409) {
+            await fetchAvailability(body.appointment_date);
+            status.textContent = data.message || "That time is already confirmed. Please choose another.";
+            return;
+          }
+          throw new Error(data?.detail || data?.error || 'Submit failed');
+        }
         status.textContent = data.message || "Saved. We’ll contact you to confirm.";
         fetchAvailability(body.appointment_date);
       }catch(err){
@@ -153,17 +215,133 @@
 
     function setDefaultDateToday(){
       const d = document.getElementById('date');
-      if (!d.value) {
-        const today = new Date();
-        d.value = today.toISOString().split("T")[0];
-      }
+      if (!d.value) d.value = new Date().toISOString().split("T")[0];
     }
 
     document.getElementById('submitLead')?.addEventListener('click', saveLead);
     document.getElementById('date')?.addEventListener('change', (e)=> fetchAvailability(e.target.value));
+    setDefaultDateToday(); fetchAvailability(document.getElementById('date').value);
 
-    setDefaultDateToday();
-    fetchAvailability(document.getElementById('date').value);
+    // ====== Admin slide-over ======
+    const panel = document.getElementById('adminPanel');
+    const openBtn = document.getElementById('adminBtn');
+    const closeBtn = document.getElementById('closeAdmin');
+    const loginView = document.getElementById('loginView');
+    const dashView = document.getElementById('dashView');
+    const admMsg = document.getElementById('admMsg');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    openBtn.addEventListener('click', ()=> { panel.classList.add('open'); checkSessionAndRender(); });
+    closeBtn.addEventListener('click', ()=> panel.classList.remove('open'));
+
+    // Login flow (uses session cookie from server)
+    document.getElementById('admLoginBtn').addEventListener('click', async ()=>{
+      const u = document.getElementById('admUser').value.trim();
+      const p = document.getElementById('admPass').value;
+      admMsg.textContent = "";
+      const form = new FormData();
+      form.append("username", u);
+      form.append("password", p);
+      const res = await fetch('/admin/login', { method:'POST', body: form, credentials: 'include', redirect: 'follow' });
+      if (res.redirected || res.ok) {
+        // Cookie set; show dashboard
+        loginView.style.display = 'none';
+        dashView.style.display = 'block';
+        logoutBtn.style.display = 'inline-block';
+        loadLeads();
+      } else {
+        admMsg.textContent = "Invalid login.";
+      }
+    });
+
+    logoutBtn.addEventListener('click', async ()=>{
+      await fetch('/admin/logout', { credentials:'include' });
+      loginView.style.display = 'block';
+      dashView.style.display = 'none';
+      logoutBtn.style.display = 'none';
+      admMsg.textContent = "Logged out.";
+    });
+
+    async function checkSessionAndRender(){
+      // Try hitting a protected endpoint; if 200 → logged in
+      const res = await fetch('/api/leads', { credentials:'include' });
+      if (res.ok) {
+        loginView.style.display = 'none';
+        dashView.style.display = 'block';
+        logoutBtn.style.display = 'inline-block';
+        loadLeads();
+      } else {
+        loginView.style.display = 'block';
+        dashView.style.display = 'none';
+        logoutBtn.style.display = 'none';
+      }
+    }
+
+    // Admin table
+    async function loadLeads(){
+      const res = await fetch('/api/leads', { credentials:'include' });
+      if (!res.ok){ document.getElementById('dashMsg').textContent = "Session expired. Please log in."; return; }
+      const data = await res.json();
+      const tbody = document.querySelector("#leadsTable tbody");
+      tbody.innerHTML = "";
+      const filter = document.getElementById('filterDate').value;
+
+      const leads = data.leads.filter(l => !filter || l.appointment_date === filter);
+
+      // counts
+      const cPending = leads.filter(l=>l.status==='pending').length;
+      const cConfirmed = leads.filter(l=>l.status==='confirmed').length;
+      const cCancelled = leads.filter(l=>l.status==='cancelled').length;
+      document.getElementById('countInfo').textContent = `Showing ${leads.length} (pending ${cPending} | confirmed ${cConfirmed} | cancelled ${cCancelled})`;
+
+      leads.forEach(l => {
+        const tr = document.createElement("tr");
+        const statusCell = `<span class="pill ${l.status}">${l.status}</span>`;
+        let actions = "";
+        if(l.status === "pending"){
+          actions = `
+            <button class="btn small confirm" onclick="confirmBooking('${l.booking_id}')">Confirm</button>
+            <button class="btn small cancel" onclick="cancelBooking('${l.booking_id}')">Cancel</button>
+          `;
+        } else if(l.status === "confirmed"){
+          actions = `<button class="btn small cancel" onclick="cancelBooking('${l.booking_id}')">Cancel</button>`;
+        }
+        tr.innerHTML = `
+          <td>${statusCell}</td>
+          <td>${l.name}</td>
+          <td>${l.phone}</td>
+          <td>${l.service}</td>
+          <td>${l.appointment_date}</td>
+          <td>${l.appointment_time}</td>
+          <td>${actions}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadLeads);
+    document.getElementById('filterDate').addEventListener('change', loadLeads);
+
+    // Admin actions
+    window.confirmBooking = async function(id){
+      if(!confirm("Confirm this booking?")) return;
+      const res = await fetch(`/api/confirm/${id}`, { method:"POST", credentials:'include' });
+      const data = await res.json();
+      alert(data.message || "Updated");
+      loadLeads();
+      // refresh availability if same date visible
+      const d = document.getElementById('date').value;
+      if (d) fetchAvailability(d);
+    }
+    window.cancelBooking = async function(id){
+      if(!confirm("Cancel this booking?")) return;
+      const res = await fetch(`/api/cancel/${id}`, { method:"POST", credentials:'include' });
+      const data = await res.json();
+      alert(data.message || "Updated");
+      loadLeads();
+      const d = document.getElementById('date').value;
+      if (d) fetchAvailability(d);
+    }
   </script>
 </body>
 </html>
