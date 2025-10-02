@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Nexa – Lead & Booking</title>
+  <title>Nexa – Book an Appointment</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --brand:#004aad; --bg:#f7f8fa; --text:#0f172a; --muted:#64748b; --border:#e5e7eb; }
@@ -52,7 +52,9 @@
         </div>
       </div>
 
-      <div class="note mt-2">Working hours shown are based on server availability. Booked slots are disabled.</div>
+      <div class="note mt-2">
+        Only <b>confirmed</b> bookings block the calendar. If two people pick the same time, you’ll confirm one in the email.
+      </div>
 
       <div class="mt-3"></div>
       <button class="btn" id="submitLead" type="button">Submit</button>
@@ -79,11 +81,9 @@
         const opt = document.createElement('option');
         opt.value = t;
         opt.textContent = t;
-        // disable if taken
-        if (taken.includes(t)) { opt.disabled = true; opt.textContent = `${t} (booked)`; }
+        if (taken.includes(t)) { opt.disabled = true; opt.textContent = `${t} (confirmed)`; }
         sel.appendChild(opt);
       }
-      // preselect first non-disabled
       const firstFree = Array.from(sel.options).find(o => !o.disabled);
       if (firstFree) sel.value = firstFree.value;
     }
@@ -91,7 +91,7 @@
     function showTakenPills(taken) {
       const box = document.getElementById('takenList');
       if (!taken || !taken.length) { box.textContent = ""; return; }
-      box.innerHTML = "Taken: " + taken.map(t => `<span class="pill">${t}</span>`).join(" ");
+      box.innerHTML = "Confirmed: " + taken.map(t => `<span class="pill">${t}</span>`).join(" ");
     }
 
     async function fetchAvailability(dateStr){
@@ -100,7 +100,6 @@
         headers: { 'X-Nexa-Key': NEXA_KEY }
       });
       const data = await res.json();
-      // Use hours from server to build slots (keeps UI in sync)
       const open = data?.hours?.open || "09:00";
       const close = data?.hours?.close || "18:00";
       const taken = Array.isArray(data?.taken) ? data.taken : [];
@@ -130,10 +129,9 @@
 
         if (!res.ok) {
           if (res.status === 409) {
-            // conflict - refresh availability and show message
             const taken = Array.isArray(data?.taken) ? data.taken : [];
             await fetchAvailability(body.appointment_date);
-            status.textContent = data.message || "That slot is already booked. Please choose another time.";
+            status.textContent = data.message || "That time is already confirmed. Please choose another.";
             return;
           }
           const msg = Array.isArray(data?.detail)
@@ -143,10 +141,8 @@
         }
 
         status.textContent = data.message || "Saved. We’ll contact you to confirm.";
-        // Optional: clear form after success
-        // document.getElementById('name').value = "";
-        // document.getElementById('phone').value = "";
-        // document.getElementById('service').value = "";
+        // Optionally clear fields:
+        // ['name','phone','service'].forEach(id => document.getElementById(id).value = "");
       }catch(err){
         status.textContent = "Error: " + (err.message || String(err));
       }
@@ -167,7 +163,6 @@
     document.getElementById('submitLead')?.addEventListener('click', saveLead);
     document.getElementById('date')?.addEventListener('change', (e)=> fetchAvailability(e.target.value));
 
-    // on first load: set date to today and fetch availability
     setDefaultDateToday();
     fetchAvailability(document.getElementById('date').value);
   </script>
