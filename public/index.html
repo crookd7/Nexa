@@ -18,7 +18,9 @@
     .btn:hover{filter:brightness(.95)}
     .note{color:var(--muted);font-size:13px;margin-top:6px}
     .mt-2{margin-top:10px} .mt-3{margin-top:16px}
-    .pill{display:inline-block;background:#eef2ff;color:#1e3a8a;border-radius:999px;padding:2px 8px;font-size:12px;margin:2px}
+    .pill{display:inline-block;border-radius:999px;padding:2px 8px;font-size:12px;margin:2px}
+    .pill-confirmed{background:#fee2e2;color:#991b1b} /* red-ish */
+    .pill-pending{background:#f1f5f9;color:#475569}   /* gray */
     @media (max-width:640px){ .row{grid-template-columns:1fr} }
   </style>
 </head>
@@ -46,14 +48,14 @@
           <input id="date" type="date" class="input" />
         </div>
         <div>
-          <label class="label" for="time">Time (available only)</label>
+          <label class="label" for="time">Time</label>
           <select id="time"></select>
           <div id="takenList" class="note" style="min-height:18px;margin-top:6px;"></div>
         </div>
       </div>
 
       <div class="note mt-2">
-        Only <b>confirmed</b> bookings block the calendar. If two people pick the same time, you’ll confirm one in the email.
+        Confirmed bookings block the calendar. Pending requests are shown in gray but may still be available.
       </div>
 
       <div class="mt-3"></div>
@@ -64,15 +66,15 @@
 
   <script>
     // ===== Config =====
-    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match NEXA_SERVER_KEY on server
-    const TIME_STEP_MIN = 15; // minutes per slot
+    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match server
+    const TIME_STEP_MIN = 15;
 
     // ===== Helpers =====
     function toMinutes(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
     function pad2(n){ return (n<10?'0':'')+n; }
     function minutesToHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${pad2(h)}:${pad2(m)}`; }
 
-    function buildTimeOptions(open, close, taken=[]) {
+    function buildTimeOptions(open, close, confirmed=[], pending=[]) {
       const sel = document.getElementById('time');
       sel.innerHTML = "";
       const openM = toMinutes(open), closeM = toMinutes(close);
@@ -80,18 +82,31 @@
         const t = minutesToHHMM(m);
         const opt = document.createElement('option');
         opt.value = t;
-        opt.textContent = t;
-        if (taken.includes(t)) { opt.disabled = true; opt.textContent = `${t} (confirmed)`; }
+        if (confirmed.includes(t)) {
+          opt.disabled = true;
+          opt.textContent = `${t} (confirmed)`;
+        } else if (pending.includes(t)) {
+          opt.textContent = `${t} (pending)`;
+          opt.style.color = "#64748b"; // gray text
+        } else {
+          opt.textContent = t;
+        }
         sel.appendChild(opt);
       }
       const firstFree = Array.from(sel.options).find(o => !o.disabled);
       if (firstFree) sel.value = firstFree.value;
     }
 
-    function showTakenPills(taken) {
+    function showTakenPills(confirmed, pending) {
       const box = document.getElementById('takenList');
-      if (!taken || !taken.length) { box.textContent = ""; return; }
-      box.innerHTML = "Confirmed: " + taken.map(t => `<span class="pill">${t}</span>`).join(" ");
+      const pills = [];
+      if (confirmed.length) {
+        pills.push("Confirmed: " + confirmed.map(t => `<span class="pill pill-confirmed">${t}</span>`).join(" "));
+      }
+      if (pending.length) {
+        pills.push("Pending: " + pending.map(t => `<span class="pill pill-pending">${t}</span>`).join(" "));
+      }
+      box.innerHTML = pills.join("<br/>");
     }
 
     async function fetchAvailability(dateStr){
@@ -102,12 +117,15 @@
       const data = await res.json();
       const open = data?.hours?.open || "09:00";
       const close = data?.hours?.close || "18:00";
-      const taken = Array.isArray(data?.taken) ? data.taken : [];
-      buildTimeOptions(open, close, taken);
-      showTakenPills(taken);
+
+      // new: confirmed vs pending arrays
+      const confirmed = Array.isArray(data?.taken) ? data.taken : [];
+      const pending   = Array.isArray(data?.pending) ? data.pending : [];
+
+      buildTimeOptions(open, close, confirmed, pending);
+      showTakenPills(confirmed, pending);
     }
 
-    // ===== Form submission =====
     async function saveLead(){
       const status = document.getElementById('status');
       status.textContent = "";
@@ -124,39 +142,20 @@
           headers: { 'Content-Type': 'application/json', 'X-Nexa-Key': NEXA_KEY },
           body: JSON.stringify(body)
         });
-        const raw = await res.text();
-        let data; try{ data = JSON.parse(raw) } catch{ data = { detail: raw } }
-
-        if (!res.ok) {
-          if (res.status === 409) {
-            const taken = Array.isArray(data?.taken) ? data.taken : [];
-            await fetchAvailability(body.appointment_date);
-            status.textContent = data.message || "That time is already confirmed. Please choose another.";
-            return;
-          }
-          const msg = Array.isArray(data?.detail)
-            ? data.detail.map(d => d.msg).join('; ')
-            : (data?.detail || data?.error || 'Submit failed');
-          throw new Error(msg);
-        }
-
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Submit failed");
         status.textContent = data.message || "Saved. We’ll contact you to confirm.";
-        // Optionally clear fields:
-        // ['name','phone','service'].forEach(id => document.getElementById(id).value = "");
+        fetchAvailability(body.appointment_date);
       }catch(err){
         status.textContent = "Error: " + (err.message || String(err));
       }
     }
 
-    // ===== Init =====
     function setDefaultDateToday(){
       const d = document.getElementById('date');
       if (!d.value) {
         const today = new Date();
-        const yyyy = today.getFullYear();
-        const mm = pad2(today.getMonth()+1);
-        const dd = pad2(today.getDate());
-        d.value = `${yyyy}-${mm}-${dd}`;
+        d.value = today.toISOString().split("T")[0];
       }
     }
 
