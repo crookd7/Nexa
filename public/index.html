@@ -8,7 +8,7 @@
     :root { --brand:#004aad; --bg:#f7f8fa; --text:#0f172a; --muted:#64748b; --border:#e5e7eb; }
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; }
-    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px 140px; } /* bottom pad so chat won't cover button */
+    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px 140px; }
     h1 { text-align: center; margin: 8px 0 20px; }
     .card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow:0 4px 16px rgba(0,0,0,.04); }
     .label { font-size:12px; color:var(--muted); margin-bottom:6px; display:inline-block; }
@@ -89,7 +89,8 @@
 
   <script>
     // === CONFIG ===
-    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"
+    // NOTE: Keeping the header for now to match your server guard. (Later we can replace with hCaptcha/CSRF.)
+    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; /* :contentReference[oaicite:3]{index=3} */
 
     // -------- Lead form submission --------
     async function saveLead(){
@@ -210,7 +211,7 @@
     send.addEventListener('click', sendMsg);
     input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); sendMsg(); }});
 
-    // --- Proactive chat (open once per session) ---
+    // Proactive chat (open once per session)
     (function () {
       const AUTO_DELAY_MS = 12000;
       const KEY = 'nexa_auto_opened_session';
