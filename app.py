@@ -15,24 +15,24 @@ from pydantic import BaseModel, Field
 
 
 # =========================
-# Config & constants
+# Config (Render env)
 # =========================
-NEXA_SERVER_KEY = (os.getenv("NEXA_SERVER_KEY") or "").strip()
+NEXA_SERVER_KEY  = (os.getenv("NEXA_SERVER_KEY") or "").strip()
 
-# Email via Brevo HTTP API (more reliable than SMTP)
-BREVO_API_KEY = (os.getenv("BREVO_API_KEY") or "").strip()   # Brevo API v3 key (often starts with xkeysib-…)
-SMTP_FROM      = (os.getenv("SMTP_FROM") or "").strip()      # Verified sender in Brevo
-NOTIFY_TO      = (os.getenv("NOTIFY_TO") or "").strip()      # Where owner receives notifications
+# Brevo HTTP API (NOT SMTP)
+BREVO_API_KEY    = (os.getenv("BREVO_API_KEY") or "").strip()   # Brevo API v3 key (often starts with xkeysib-…)
+SMTP_FROM        = (os.getenv("SMTP_FROM") or "").strip()       # Verified sender in Brevo
+NOTIFY_TO        = (os.getenv("NOTIFY_TO") or "").strip()       # Owner’s email
 
 # Owner link signing
-ADMIN_SECRET   = (os.getenv("ADMIN_SECRET") or "").strip()   # any long random string
-PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip()  # optional, e.g. https://yourdomain.tld
+ADMIN_SECRET     = (os.getenv("ADMIN_SECRET") or "").strip()    # any long random string
+PUBLIC_BASE_URL  = (os.getenv("PUBLIC_BASE_URL") or "").strip() # e.g. https://nexa-p6nu.onrender.com
 
 LEADS_FILE = "leads.csv"
 
-# ONLY confirmed bookings block the calendar
+# ONLY confirmed bookings block availability
 BOOKED_STATUSES = {"confirmed"}
-BUSINESS_HOURS = ("09:00", "18:00")  # purely informational for UI
+BUSINESS_HOURS  = ("09:00", "18:00")  # UI hint only
 
 
 # =========================
@@ -42,7 +42,7 @@ app = FastAPI(title="Nexa Lead API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],           # tighten later
+    allow_origins=["*"],      # tighten later if needed
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,18 +54,19 @@ app.add_middleware(
 # =========================
 class Lead(BaseModel):
     name: str = Field(min_length=1)
-    email: Optional[str] = None               # optional by request
+    email: Optional[str] = None            # optional by request
     phone: str = Field(min_length=5)
     service: str = Field(min_length=1)
-    appointment_date: str                     # "YYYY-MM-DD"
-    appointment_time: str                     # "HH:MM" (24h)
-
+    appointment_date: str                  # "YYYY-MM-DD"
+    appointment_time: str                  # "HH:MM" (24h)
 
 class LeadResponse(BaseModel):
     ok: bool
     message: str
     booking_status: str = "pending"
     taken: Optional[List[str]] = None
+    confirm_url: Optional[str] = None
+    cancel_url: Optional[str] = None
 
 
 # =========================
@@ -80,8 +81,7 @@ def _ensure_csv() -> None:
     new_file = not os.path.exists(LEADS_FILE)
     if new_file:
         with open(LEADS_FILE, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(CSV_HEADER)
+            csv.writer(f).writerow(CSV_HEADER)
 
 def _row_to_dict(row: List[str]) -> Dict[str, str]:
     return {
@@ -98,22 +98,21 @@ def _row_to_dict(row: List[str]) -> Dict[str, str]:
 
 def read_all_leads() -> List[Dict[str, str]]:
     _ensure_csv()
-    leads: List[Dict[str, str]] = []
+    out: List[Dict[str, str]] = []
     with open(LEADS_FILE, "r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
         _ = next(reader, None)  # header
         for row in reader:
             if not row or len(row) < len(CSV_HEADER):
                 continue
-            leads.append(_row_to_dict(row))
-    return leads
+            out.append(_row_to_dict(row))
+    return out
 
 def write_lead(status: str, lead: Lead) -> str:
     _ensure_csv()
     booking_id = str(uuid.uuid4())
     with open(LEADS_FILE, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([
+        csv.writer(f).writerow([
             booking_id,
             datetime.utcnow().isoformat(),
             status,
@@ -129,32 +128,32 @@ def write_lead(status: str, lead: Lead) -> str:
 def update_booking_status(booking_id: str, new_status: str) -> bool:
     if not os.path.exists(LEADS_FILE):
         return False
-    rows = []
-    found = False
+    rows, found = [], False
     with open(LEADS_FILE, "r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader, None)
+        _ = next(reader, None)
         for row in reader:
             if not row:
                 continue
             if row[0] == booking_id:
-                row[2] = new_status  # status column
+                row[2] = new_status
                 found = True
             rows.append(row)
     if not found:
         return False
     with open(LEADS_FILE, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(CSV_HEADER)
-        writer.writerows(rows)
+        w = csv.writer(f)
+        w.writerow(CSV_HEADER)
+        w.writerows(rows)
     return True
 
 def list_taken_slots_for_date(date_str: str) -> List[str]:
-    """Return list of times (HH:MM) that are already CONFIRMED for the date."""
+    """Return times (HH:MM) that are already CONFIRMED for the date."""
     taken: List[str] = []
     for r in read_all_leads():
         if r["appointment_date"] == date_str and r["status"] in BOOKED_STATUSES:
             taken.append(r["appointment_time"])
+    # unique + sorted
     return sorted(list(dict.fromkeys(taken)))
 
 
@@ -175,10 +174,9 @@ def _verify(action: str, booking_id: str, token: str) -> bool:
 
 
 # =========================
-# Email (Brevo API)
+# Email (Brevo API) — HTML buttons + text fallback
 # =========================
-def send_via_brevo_api(subject: str, text: str) -> None:
-    """Send email to NOTIFY_TO using Brevo HTTP API. Non-fatal on failure."""
+def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None) -> None:
     if not BREVO_API_KEY:
         print("❌ BREVO_API_KEY missing/empty")
         return
@@ -192,6 +190,9 @@ def send_via_brevo_api(subject: str, text: str) -> None:
         "subject": subject,
         "textContent": text,
     }
+    if html:
+        payload["htmlContent"] = html
+
     req = urllib.request.Request(
         "https://api.brevo.com/v3/smtp/email",
         data=json.dumps(payload).encode("utf-8"),
@@ -208,13 +209,68 @@ def send_via_brevo_api(subject: str, text: str) -> None:
     except Exception as e:
         print(f"❌ Brevo API email failed: {e}")
 
+def build_owner_email(booking_id: str, lead: Lead, confirm_url: str, cancel_url: str):
+    subject = "New Website Lead (pending)"
+    text = (
+        f"Booking ID: {booking_id}\n"
+        f"Name: {lead.name}\n"
+        f"Email: {lead.email or '(not provided)'}\n"
+        f"Phone: {lead.phone}\n"
+        f"Service: {lead.service}\n"
+        f"Date: {lead.appointment_date}\n"
+        f"Time: {lead.appointment_time}\n"
+        f"Status: pending\n\n"
+        "Note: Pending bookings do NOT block the calendar. Only confirmed bookings do.\n\n"
+        "Owner actions:\n"
+        f"✓ Confirm: {confirm_url}\n"
+        f"✕ Cancel:  {cancel_url}\n"
+    )
+    html = f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#0f172a">
+      <h2 style="margin:0 0 8px">New Website Lead <small style="color:#64748b">(pending)</small></h2>
+      <table style="border-collapse:collapse;margin-top:8px">
+        <tr><td style="padding:4px 8px;color:#64748b">Booking ID:</td><td style="padding:4px 8px">{booking_id}</td></tr>
+        <tr><td style="padding:4px 8px;color:#64748b">Name:</td><td style="padding:4px 8px">{lead.name}</td></tr>
+        <tr><td style="padding:4px 8px;color:#64748b">Email:</td><td style="padding:4px 8px">{lead.email or '(not provided)'}</td></tr>
+        <tr><td style="padding:4px 8px;color:#64748b">Phone:</td><td style="padding:4px 8px">{lead.phone}</td></tr>
+        <tr><td style="padding:4px 8px;color:#64748b">Service:</td><td style="padding:4px 8px">{lead.service}</td></tr>
+        <tr><td style="padding:4px 8px;color:#64748b">Date:</td><td style="padding:4px 8px">{lead.appointment_date}</td></tr>
+        <tr><td style="padding:4px 8px;color:#64748b">Time:</td><td style="padding:4px 8px">{lead.appointment_time}</td></tr>
+        <tr><td style="padding:4px 8px;color:#64748b">Status:</td><td style="padding:4px 8px">pending</td></tr>
+      </table>
+
+      <p style="margin-top:12px;color:#475569">
+        Note: Pending bookings do <b>not</b> block the calendar. Only <b>confirmed</b> bookings do.
+      </p>
+
+      <div style="margin-top:16px">
+        <a href="{confirm_url}"
+           style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;
+                  padding:10px 14px;border-radius:8px;font-weight:700;margin-right:8px">
+          ✓ Confirm
+        </a>
+        <a href="{cancel_url}"
+           style="display:inline-block;background:#ef4444;color:#fff;text-decoration:none;
+                  padding:10px 14px;border-radius:8px;font-weight:700">
+          ✕ Cancel
+        </a>
+      </div>
+
+      <p style="margin-top:12px;color:#64748b;font-size:13px">
+        If buttons don't work, copy a link:<br/>
+        Confirm: <a href="{confirm_url}">{confirm_url}</a><br/>
+        Cancel: <a href="{cancel_url}">{cancel_url}</a>
+      </p>
+    </div>
+    """
+    return subject, text, html
+
 
 # =========================
-# Guard middleware
+# Middleware: protect /api/*
 # =========================
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    # Protect all /api/* endpoints with X-Nexa-Key header
     if request.url.path.startswith("/api"):
         header_key = request.headers.get("X-Nexa-Key", "")
         if not (NEXA_SERVER_KEY and header_key == NEXA_SERVER_KEY):
@@ -238,15 +294,13 @@ async def public_files(path: str):
 
 @app.get("/api/availability")
 async def availability(date: str = Query(..., description="YYYY-MM-DD")):
-    """
-    Returns taken time slots for the given date (only CONFIRMED bookings block).
-    """
+    """Taken time slots for the date (only CONFIRMED block)."""
     taken = list_taken_slots_for_date(date)
     return {"date": date, "taken": taken, "hours": {"open": BUSINESS_HOURS[0], "close": BUSINESS_HOURS[1]}}
 
 @app.post("/api/lead", response_model=LeadResponse)
 async def create_lead(lead: Lead):
-    # Conflict only if the exact slot is already CONFIRMED
+    # Conflict only if slot is already CONFIRMED
     taken = list_taken_slots_for_date(lead.appointment_date)
     if lead.appointment_time in taken:
         return JSONResponse(
@@ -259,38 +313,26 @@ async def create_lead(lead: Lead):
             },
         )
 
-    # Save as "pending" (soft hold; multiple pendings for same slot allowed)
+    # Save as pending (soft hold)
     booking_id = write_lead("pending", lead)
 
-    # Signed owner links (confirm / cancel)
+    # Signed owner links
     confirm_token = _sign("confirm", booking_id)
     cancel_token  = _sign("cancel", booking_id)
-    base = PUBLIC_BASE_URL or ""  # optional absolute base
+    base = PUBLIC_BASE_URL or ""  # if empty, links resolve on same host
     confirm_url = f"{base}/confirm/{booking_id}?token={confirm_token}"
     cancel_url  = f"{base}/cancel/{booking_id}?token={cancel_token}"
 
-    # Notify owner
-    subject = "New Website Lead (pending)"
-    body = (
-        f"Booking ID: {booking_id}\n"
-        f"Name: {lead.name}\n"
-        f"Email: {lead.email or '(not provided)'}\n"
-        f"Phone: {lead.phone}\n"
-        f"Service: {lead.service}\n"
-        f"Date: {lead.appointment_date}\n"
-        f"Time: {lead.appointment_time}\n"
-        f"Status: pending\n\n"
-        "Note: Pending bookings do NOT block the calendar. Only confirmed bookings do.\n\n"
-        "Owner actions:\n"
-        f"✓ Confirm: {confirm_url}\n"
-        f"✕ Cancel:  {cancel_url}\n"
-    )
-    send_via_brevo_api(subject, body)
+    # Email owner (HTML buttons + text fallback)
+    subject, text, html = build_owner_email(booking_id, lead, confirm_url, cancel_url)
+    send_via_brevo_api(subject, text, html)
 
     return {
         "ok": True,
         "message": "Lead saved. We will contact you to confirm the appointment.",
         "booking_status": "pending",
+        "confirm_url": confirm_url,  # helpful while testing
+        "cancel_url": cancel_url,
     }
 
 @app.get("/confirm/{booking_id}", response_class=HTMLResponse)
@@ -339,10 +381,10 @@ async def cancel_booking(booking_id: str, token: str):
 async def test_email():
     subject = "Test Email from API"
     body = "This is a test email from your Render FastAPI service."
-    send_via_brevo_api(subject, body)
+    send_via_brevo_api(subject, body, "<p>This is a <b>test</b> email from your Render FastAPI service.</p>")
     return {"ok": True, "message": "Test email sent."}
 
-# Admin: download CSV (protected by the header via middleware)
+# Admin: download CSV (protected by middleware header)
 @app.get("/api/leads.csv")
 async def download_csv():
     _ensure_csv()
