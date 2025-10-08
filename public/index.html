@@ -54,7 +54,7 @@
       background:#004aad; color:#fff; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.15);
     }
     .chatbox{
-      position:fixed; right:16px; bottom:76px; width:320px; max-width:90vw; height:420px;
+      position:fixed; right:16px; bottom:76px; width:320px; max-width:90vw; height:460px;
       background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 16px 36px rgba(0,0,0,.18);
       display:none; flex-direction:column; overflow:hidden; z-index:9998;
     }
@@ -162,7 +162,27 @@
       <strong>Assistant</strong>
       <button id="chatClose" class="btn small" style="background:#475569;color:#fff">Close ✕</button>
     </div>
+
     <div class="chat-messages" id="chatMessages"></div>
+
+    <!-- quick replies -->
+    <div id="chatChips" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid #e5e7eb;background:#fff">
+      <button class="btn small" onclick="sendChip('availability ' + new Date().toISOString().slice(0,10))">Today’s availability</button>
+      <button class="btn small" onclick="sendChip('availability 2025-10-05')">Check 2025-10-05</button>
+      <button class="btn small" onclick="sendChip('What services do you offer?')">Services</button>
+      <button class="btn small" onclick="openHumanForm()">Talk to a human</button>
+    </div>
+
+    <!-- human contact form -->
+    <div id="humanForm" style="display:none;padding:10px;border-top:1px solid #e5e7eb;background:#fff">
+      <div style="font-weight:600;margin-bottom:6px">Request a callback</div>
+      <input id="hfName" class="input" placeholder="Your name" style="margin-bottom:6px;padding:8px;font-size:14px">
+      <input id="hfPhone" class="input" placeholder="Phone (incl. country code)" style="margin-bottom:6px;padding:8px;font-size:14px">
+      <input id="hfMsg" class="input" placeholder="Short message (optional)" style="margin-bottom:6px;padding:8px;font-size:14px">
+      <button class="btn" onclick="submitHumanForm()" style="width:100%">Request callback</button>
+      <div id="hfStatus" class="note" style="margin-top:6px"></div>
+    </div>
+
     <div class="chat-input">
       <input id="chatInput" placeholder="Ask about availability or say 'book me…'"/>
       <button id="chatSend">Send</button>
@@ -265,8 +285,17 @@
     const admMsg = document.getElementById('admMsg');
     const logoutBtn = document.getElementById('logoutBtn');
 
-    openBtn.addEventListener('click', ()=> { panel.classList.add('open'); checkSessionAndRender(); });
-    closeBtn.addEventListener('click', ()=> panel.classList.remove('open'));
+    // TOGGLE behavior
+    openBtn.addEventListener('click', () => {
+      if (panel.classList.contains('open')) {
+        panel.classList.remove('open');
+      } else {
+        panel.classList.add('open');
+        checkSessionAndRender();
+      }
+    });
+
+    closeBtn.addEventListener('click', () => panel.classList.remove('open'));
 
     document.getElementById('admLoginBtn').addEventListener('click', async ()=>{
       const u = document.getElementById('admUser').value.trim();
@@ -388,7 +417,7 @@
     function openChat(){
       chatBox.classList.add('open');
       if (!chatMessages.dataset.greeted){
-        addMsg("Hi! Ask me about availability (e.g. 'availability 2025-10-05') or say 'book me…' with your name, phone, service, date and time.");
+        addMsg("Hey there! 👋 I can check availability, pencil you in, or answer quick questions. Try the buttons below or ask me anything.");
         chatMessages.dataset.greeted = '1';
       }
       chatInput.focus();
@@ -398,11 +427,58 @@
     chatBtn.addEventListener('click', openChat);
     chatClose.addEventListener('click', closeChat);
 
+    function sendChip(text){
+      chatInput.value = text;
+      sendChat();
+    }
+
+    // Simple local FAQ for instant answers; otherwise use /api/chat
+    function localFAQ(q){
+      const s = q.toLowerCase().trim();
+      if (/(hour|open|close|working)/.test(s)) return "We’re open from 09:00 to 18:00, Monday–Friday.";
+      if (/(where|address|location|office)/.test(s)) return "We’re in Sofia. Need directions? I can have a human text you exact details.";
+      if (/(service|offer|do you do)/.test(s)) return "We offer consultations and scheduling. Tell me what you need and I’ll help book a slot.";
+      if (/(price|cost|fee)/.test(s)) return "Pricing varies by service. I can connect you with a human to confirm a quote.";
+      if (/(human|agent|person|contact)/.test(s)) { openHumanForm(); return "Sure—leave your name and phone, and we’ll call you shortly."; }
+      return null;
+    }
+
+    function openHumanForm(){
+      document.getElementById('humanForm').style.display='block';
+    }
+
+    async function submitHumanForm(){
+      const name = document.getElementById('hfName').value.trim();
+      const phone = document.getElementById('hfPhone').value.trim();
+      const message = document.getElementById('hfMsg').value.trim();
+      const status = document.getElementById('hfStatus');
+      status.textContent = '';
+      try{
+        const res = await fetch('/api/chat-contact', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ name, phone, message })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        status.textContent = data.message || 'Request sent.';
+        addMsg("Got it! A human will reach out shortly. Anything else I can help with meanwhile?", 'bot');
+      }catch(e){
+        status.textContent = 'Sorry—could not send. Please check your phone number and try again.';
+      }
+    }
+    window.openHumanForm = openHumanForm;
+    window.submitHumanForm = submitHumanForm;
+
     async function sendChat(){
       const msg = chatInput.value.trim();
       if(!msg) return;
       addMsg(msg, 'user');
       chatInput.value = '';
+
+      const local = localFAQ(msg);
+      if (local) { addMsg(local, 'bot'); return; }
+
       try{
         const res = await fetch('/api/chat', {
           method:'POST',
