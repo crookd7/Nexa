@@ -160,7 +160,7 @@
   <div class="chatbox" id="chatbox" aria-hidden="true">
     <div class="chat-header">
       <strong>Nexa</strong>
-      <button id="chatClose" class="btn small" style="background:#475569;color:#fff">✕</button>
+      <button id="chatClose" class="icon-btn" aria-label="Close">✕</button>
     </div>
 
     <div class="chat-messages" id="chatMessages"></div>
@@ -170,7 +170,7 @@
       <button class="btn small" onclick="sendChip('availability ' + new Date().toISOString().slice(0,10))">Today’s availability</button>
       <button class="btn small" onclick="sendChip('availability 2025-10-05')">Check 2025-10-05</button>
       <button class="btn small" onclick="sendChip('What services do you offer?')">Services</button>
-      <button class="btn small" onclick="openHumanForm()">Talk to a human</button>
+      <button class="btn small" onclick="openHumanForm()">Talk to an Agent</button>
     </div>
 
     <!-- human contact form -->
