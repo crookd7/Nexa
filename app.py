@@ -6,7 +6,7 @@ import hmac
 import hashlib
 import urllib.request
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, List, Dict
 
 from fastapi import FastAPI, Request, HTTPException, Query, Form
@@ -30,7 +30,7 @@ NEXA_SERVER_KEY = (os.getenv("NEXA_SERVER_KEY") or "").strip()
 # Brevo HTTP API (NOT SMTP)
 BREVO_API_KEY = (os.getenv("BREVO_API_KEY") or "").strip()
 SMTP_FROM = (os.getenv("SMTP_FROM") or "").strip()      # verified sender in Brevo
-NOTIFY_TO = (os.getenv("NOTIFY_TO") or "").strip()      # where owner receives notifications
+NOTIFY_TO = (os.getenv("NOTIFY_TO") or "").strip()      # owner notifications
 
 # Email confirm/cancel link signing
 ADMIN_SECRET = (os.getenv("ADMIN_SECRET") or "").strip()  # long random string
@@ -42,7 +42,7 @@ ADMIN_PASS = (os.getenv("ADMIN_PASS") or "changeme").strip()
 SESSION_SECRET = os.getenv("SESSION_SECRET") or "supersecret123"
 serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
 
-# Optional: OpenAI key (not required; chatbot is rule-based if missing)
+# Optional: OpenAI key (only used to "niceify" replies)
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
 # Data
@@ -164,12 +164,10 @@ def update_booking_status(booking_id: str, new_status: str) -> bool:
     return True
 
 def list_taken_slots_for_date(date_str: str) -> List[str]:
-    """Return times (HH:MM) that are already CONFIRMED for the date."""
     taken: List[str] = []
     for r in read_all_leads():
         if r["appointment_date"] == date_str and r["status"] in BOOKED_STATUSES:
             taken.append(r["appointment_time"])
-    # unique + sorted
     return sorted(list(dict.fromkeys(taken)))
 
 def list_pending_slots_for_date(date_str: str) -> List[str]:
@@ -304,8 +302,12 @@ def verify_session(token: str) -> bool:
 async def protect(request: Request, call_next):
     path = request.url.path
 
-    # Public read-only API so the public page can load
-    if path.startswith("/api/availability") or path.startswith("/api/chat"):
+    # Public read-only API so the public page & chat can load
+    if (
+        path.startswith("/api/availability")
+        or path.startswith("/api/chat")
+        or path.startswith("/api/chat-contact")
+    ):
         return await call_next(request)
 
     # Lead submission is protected by header key (from public form)
@@ -361,7 +363,7 @@ async def availability(date: str = Query(..., description="YYYY-MM-DD")):
     pending = list_pending_slots_for_date(date)
     return {
         "date": date,
-        "taken": taken,               # confirmed
+        "taken": taken,               # confirmed (blocked)
         "pending": pending,           # pending requests (informational)
         "hours": {"open": BUSINESS_HOURS[0], "close": BUSINESS_HOURS[1]},
     }
@@ -395,7 +397,6 @@ async def create_lead(lead: Lead):
         "ok": True,
         "message": "Lead saved. We will contact you to confirm the appointment.",
         "booking_status": "pending",
-        # returning links is handy while testing
         "confirm_url": confirm_url,
         "cancel_url": cancel_url,
     }
@@ -414,7 +415,7 @@ async def confirm_booking(booking_id: str, token: str):
     if target["status"] == "confirmed":
         return HTMLResponse("<h2>✅ Already confirmed.</h2>")
 
-    # Avoid double-confirm: refuse if another booking already confirmed for same slot
+    # Avoid double-confirm: refuse if another booking is confirmed for same slot
     for r in leads:
         if (
             r["booking_id"] != booking_id
@@ -492,10 +493,8 @@ async def admin_logout():
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
-    # This serves the admin table UI (if you keep a separate admin.html)
     path = os.path.join("public", "admin.html")
     if not os.path.isfile(path):
-        # If you don't have a separate admin.html, you can show a small placeholder
         return HTMLResponse("<h2>Admin dashboard is embedded in the public page (open the 🔑 Admin panel).</h2>")
     return FileResponse(path)
 
@@ -509,13 +508,11 @@ async def download_csv():
 # =========================
 # Chatbot endpoint (public)
 # =========================
-# Minimal NL parsing to access availability & create bookings from chat.
-# If OPENAI_API_KEY is present, we can rephrase responses via OpenAI (optional niceness).
 DATE_RX = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
 TIME_RX = re.compile(r"\b([01]\d|2[0-3]):([0-5]\d)\b")
 
 def _nice_reply(text: str) -> str:
-    """Optionally send to OpenAI for a nicer phrasing."""
+    """Optionally send to OpenAI for nicer phrasing."""
     if not OPENAI_API_KEY:
         return text
     try:
@@ -546,16 +543,26 @@ async def chat(payload: Dict[str, str]):
     Public chatbot. Understands:
       - availability: "free slots on 2025-10-05", "availability 2025-10-05"
       - booking: "book me NAME phone +359... service haircut on 2025-10-05 at 14:30"
-    Extracts date/time/name/phone/service when possible.
     Creates PENDING booking (owner confirms via email or admin panel).
+    Also handles simple FAQs server-side if you want to keep logic centralized.
     """
     msg = (payload.get("message") or "").strip()
     if not msg:
-        return {"reply": "Hi! Ask me about availability (e.g. 'availability 2025-10-05') or say 'book me ...' with your name, phone, service, date and time."}
+        return {"reply": "Hi! Ask me about availability (e.g. 'availability 2025-10-05') or say 'book me…' with your name, phone, service, date and time."}
 
     low = msg.lower()
 
-    # 1) Availability intent
+    # simple FAQ (server-side fallback)
+    if any(k in low for k in ["hour", "open", "close", "working"]):
+        return {"reply": _nice_reply("We’re open from 09:00 to 18:00, Monday to Friday.")}
+    if any(k in low for k in ["where", "address", "location", "office"]):
+        return {"reply": _nice_reply("We’re in Sofia. If you need directions, I can have a human text you details.")}
+    if "service" in low or "offer" in low:
+        return {"reply": _nice_reply("We offer consultations and scheduling. Tell me what you need and I’ll help book a slot.")}
+    if "price" in low or "cost" in low or "fee" in low:
+        return {"reply": _nice_reply("Pricing varies by service. I can connect you with a human to confirm a quote.")}
+
+    # 1) Availability
     if "avail" in low or "free" in low or "slots" in low:
         m = DATE_RX.search(msg)
         if not m:
@@ -572,9 +579,8 @@ async def chat(payload: Dict[str, str]):
             base = f"{date_str} — Confirmed (blocked): {t}. Pending requests: {p}. Tell me a time and I can tentatively book you."
         return {"reply": _nice_reply(base)}
 
-    # 2) Booking intent (very simple extraction)
+    # 2) Booking intent (basic extraction)
     if "book" in low or "schedule" in low or "appointment" in low:
-        # extract fields
         date_m = DATE_RX.search(msg)
         time_m = TIME_RX.search(msg)
         name_m = re.search(r"(?:i am|i'm|name is)\s+([^\.,\n]+)", low) or re.search(r"\bname\s*:\s*([^\.,\n]+)", low)
@@ -582,23 +588,20 @@ async def chat(payload: Dict[str, str]):
         service_m = re.search(r"(?:service|for|need|want)\s+([a-zA-Zа-яА-Я0-9 \-_/]{2,})", msg)
 
         if not (date_m and time_m):
-            return {"reply": _nice_reply("Please include date (YYYY-MM-DD) and time (HH:MM). For example: 'book me for haircut on 2025-10-05 at 14:30'.")}
+            return {"reply": _nice_reply("Please include date (YYYY-MM-DD) and time (HH:MM). For example: 'book me for a consultation on 2025-10-05 at 14:30'.")}
 
         date_str = date_m.group(1)
         time_str = f"{time_m.group(1)}:{time_m.group(2)}"
 
-        # Defaults if missing
         name = (name_m.group(1).strip() if name_m else "Guest").title()
         phone = (phone_m.group(1).strip() if phone_m else "unknown")
         service = (service_m.group(1).strip() if service_m else "service")
 
-        # Conflict check against confirmed
         taken = list_taken_slots_for_date(date_str)
         if time_str in taken:
             base = f"That time ({date_str} {time_str}) is already confirmed. Try another time."
             return {"reply": _nice_reply(base)}
 
-        # Create pending lead
         lead = Lead(
             name=name,
             email=None,
@@ -609,7 +612,6 @@ async def chat(payload: Dict[str, str]):
         )
         booking_id = write_lead("pending", lead)
 
-        # Send owner email
         confirm_token = _sign("confirm", booking_id)
         cancel_token = _sign("cancel", booking_id)
         base_url = PUBLIC_BASE_URL or ""
@@ -627,8 +629,37 @@ async def chat(payload: Dict[str, str]):
     # 3) Fallback
     help_text = (
         "I can check availability or tentatively book you. "
-        "Examples:\n"
-        "• availability 2025-10-05\n"
-        "• book me for haircut on 2025-10-05 at 14:30, I'm Alex, phone +359..."
+        "Try: ‘availability 2025-10-05’ or "
+        "‘book me for consultation on 2025-10-05 at 14:30, I'm Alex, phone +359…’. "
+        "You can also say ‘talk to a human’ to request a callback."
     )
     return {"reply": _nice_reply(help_text)}
+
+
+# =========================
+# Chat → human callback (public)
+# =========================
+@app.post("/api/chat-contact")
+async def chat_contact(payload: Dict[str, str]):
+    """
+    Public: request a human callback from chat.
+    Expected payload: { "name": "...", "phone": "...", "message": "..." }
+    """
+    name = (payload.get("name") or "").strip() or "Guest"
+    phone = (payload.get("phone") or "").strip()
+    msg = (payload.get("message") or "").strip()
+
+    if not phone:
+        return JSONResponse({"ok": False, "message": "Phone is required."}, status_code=400)
+
+    subject = "Chat: Callback request"
+    text = f"Callback request from chat:\nName: {name}\nPhone: {phone}\nMessage: {msg or '(none)'}"
+    html = f"""
+      <h3>Callback request from chat</h3>
+      <p><b>Name:</b> {name}<br/>
+         <b>Phone:</b> {phone}<br/>
+         <b>Message:</b> {msg or '(none)'}
+      </p>
+    """
+    send_via_brevo_api(subject, text, html)
+    return {"ok": True, "message": "Thanks! A human will contact you shortly."}
