@@ -5,7 +5,8 @@ import uuid
 import hmac
 import hashlib
 import urllib.request
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 
 from fastapi import FastAPI, Request, HTTPException, Query, Form
@@ -40,6 +41,9 @@ ADMIN_USER = (os.getenv("ADMIN_USER") or "admin").strip()
 ADMIN_PASS = (os.getenv("ADMIN_PASS") or "changeme").strip()
 SESSION_SECRET = os.getenv("SESSION_SECRET") or "supersecret123"
 serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
+
+# Optional: OpenAI key (not required; chatbot is rule-based if missing)
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
 # Data
 LEADS_FILE = "leads.csv"
@@ -168,6 +172,13 @@ def list_taken_slots_for_date(date_str: str) -> List[str]:
     # unique + sorted
     return sorted(list(dict.fromkeys(taken)))
 
+def list_pending_slots_for_date(date_str: str) -> List[str]:
+    pending: List[str] = []
+    for r in read_all_leads():
+        if r["appointment_date"] == date_str and r["status"] == "pending":
+            pending.append(r["appointment_time"])
+    return sorted(list(dict.fromkeys(pending)))
+
 
 # =========================
 # Token signing (for email confirm/cancel)
@@ -294,7 +305,7 @@ async def protect(request: Request, call_next):
     path = request.url.path
 
     # Public read-only API so the public page can load
-    if path.startswith("/api/availability"):
+    if path.startswith("/api/availability") or path.startswith("/api/chat"):
         return await call_next(request)
 
     # Lead submission is protected by header key (from public form)
@@ -343,11 +354,17 @@ async def admin_login_page():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path)
 
-# Public availability (only confirmed times are blocked)
+# Public availability (confirmed + pending info)
 @app.get("/api/availability")
 async def availability(date: str = Query(..., description="YYYY-MM-DD")):
     taken = list_taken_slots_for_date(date)
-    return {"date": date, "taken": taken, "hours": {"open": BUSINESS_HOURS[0], "close": BUSINESS_HOURS[1]}}
+    pending = list_pending_slots_for_date(date)
+    return {
+        "date": date,
+        "taken": taken,               # confirmed
+        "pending": pending,           # pending requests (informational)
+        "hours": {"open": BUSINESS_HOURS[0], "close": BUSINESS_HOURS[1]},
+    }
 
 # Lead submission (public form → header key required by middleware)
 @app.post("/api/lead", response_model=LeadResponse)
@@ -487,3 +504,131 @@ async def admin_page():
 async def download_csv():
     _ensure_csv()
     return FileResponse(LEADS_FILE, media_type="text/csv", filename="leads.csv")
+
+
+# =========================
+# Chatbot endpoint (public)
+# =========================
+# Minimal NL parsing to access availability & create bookings from chat.
+# If OPENAI_API_KEY is present, we can rephrase responses via OpenAI (optional niceness).
+DATE_RX = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
+TIME_RX = re.compile(r"\b([01]\d|2[0-3]):([0-5]\d)\b")
+
+def _nice_reply(text: str) -> str:
+    """Optionally send to OpenAI for a nicer phrasing."""
+    if not OPENAI_API_KEY:
+        return text
+    try:
+        payload = {
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "You are a concise, friendly booking assistant. Keep replies under 120 words."},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0.2,
+        }
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print(f"OpenAI nicening failed: {e}")
+        return text
+
+@app.post("/api/chat")
+async def chat(payload: Dict[str, str]):
+    """
+    Public chatbot. Understands:
+      - availability: "free slots on 2025-10-05", "availability 2025-10-05"
+      - booking: "book me NAME phone +359... service haircut on 2025-10-05 at 14:30"
+    Extracts date/time/name/phone/service when possible.
+    Creates PENDING booking (owner confirms via email or admin panel).
+    """
+    msg = (payload.get("message") or "").strip()
+    if not msg:
+        return {"reply": "Hi! Ask me about availability (e.g. 'availability 2025-10-05') or say 'book me ...' with your name, phone, service, date and time."}
+
+    low = msg.lower()
+
+    # 1) Availability intent
+    if "avail" in low or "free" in low or "slots" in low:
+        m = DATE_RX.search(msg)
+        if not m:
+            base = "Please tell me the date like 2025-10-05."
+            return {"reply": _nice_reply(base)}
+        date_str = m.group(1)
+        taken = list_taken_slots_for_date(date_str)
+        pending = list_pending_slots_for_date(date_str)
+        if not taken and not pending:
+            base = f"{date_str}: All times look open between {BUSINESS_HOURS[0]} and {BUSINESS_HOURS[1]}."
+        else:
+            t = ", ".join(taken) if taken else "none"
+            p = ", ".join(pending) if pending else "none"
+            base = f"{date_str} — Confirmed (blocked): {t}. Pending requests: {p}. Tell me a time and I can tentatively book you."
+        return {"reply": _nice_reply(base)}
+
+    # 2) Booking intent (very simple extraction)
+    if "book" in low or "schedule" in low or "appointment" in low:
+        # extract fields
+        date_m = DATE_RX.search(msg)
+        time_m = TIME_RX.search(msg)
+        name_m = re.search(r"(?:i am|i'm|name is)\s+([^\.,\n]+)", low) or re.search(r"\bname\s*:\s*([^\.,\n]+)", low)
+        phone_m = re.search(r"(?:phone|tel|mobile|gsm)\s*[:\-]?\s*([\+\d][\d\s\-]{6,})", low)
+        service_m = re.search(r"(?:service|for|need|want)\s+([a-zA-Zа-яА-Я0-9 \-_/]{2,})", msg)
+
+        if not (date_m and time_m):
+            return {"reply": _nice_reply("Please include date (YYYY-MM-DD) and time (HH:MM). For example: 'book me for haircut on 2025-10-05 at 14:30'.")}
+
+        date_str = date_m.group(1)
+        time_str = f"{time_m.group(1)}:{time_m.group(2)}"
+
+        # Defaults if missing
+        name = (name_m.group(1).strip() if name_m else "Guest").title()
+        phone = (phone_m.group(1).strip() if phone_m else "unknown")
+        service = (service_m.group(1).strip() if service_m else "service")
+
+        # Conflict check against confirmed
+        taken = list_taken_slots_for_date(date_str)
+        if time_str in taken:
+            base = f"That time ({date_str} {time_str}) is already confirmed. Try another time."
+            return {"reply": _nice_reply(base)}
+
+        # Create pending lead
+        lead = Lead(
+            name=name,
+            email=None,
+            phone=phone,
+            service=service,
+            appointment_date=date_str,
+            appointment_time=time_str,
+        )
+        booking_id = write_lead("pending", lead)
+
+        # Send owner email
+        confirm_token = _sign("confirm", booking_id)
+        cancel_token = _sign("cancel", booking_id)
+        base_url = PUBLIC_BASE_URL or ""
+        confirm_url = f"{base_url}/confirm/{booking_id}?token={confirm_token}"
+        cancel_url = f"{base_url}/cancel/{booking_id}?token={cancel_token}"
+        subject, text, html = build_owner_email(booking_id, lead, confirm_url, cancel_url)
+        send_via_brevo_api(subject, text, html)
+
+        base = (
+            f"Done! I created a pending booking for {name} on {date_str} at {time_str} for '{service}'. "
+            "The owner will confirm shortly; if accepted, the slot will be blocked."
+        )
+        return {"reply": _nice_reply(base)}
+
+    # 3) Fallback
+    help_text = (
+        "I can check availability or tentatively book you. "
+        "Examples:\n"
+        "• availability 2025-10-05\n"
+        "• book me for haircut on 2025-10-05 at 14:30, I'm Alex, phone +359..."
+    )
+    return {"reply": _nice_reply(help_text)}
