@@ -12,6 +12,7 @@ from typing import Optional, List, Dict
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
 
@@ -39,7 +40,8 @@ serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
 # Business copy for FAQs
-BUSINESS_DESC = (os.getenv("BUSINESS_DESC") or "We provide consultations and scheduling for clients in Sofia.").strip()
+BUSINESS_DESC = (os.getenv("BUSINESS_DESC") or
+                 "We provide consultations and scheduling for clients in Sofia.").strip()
 
 # Data (ephemeral unless using a Render Disk)
 LEADS_FILE = os.getenv("LEADS_FILE") or "leads.csv"
@@ -269,13 +271,13 @@ def verify_session(token: str) -> bool:
         return False
 
 # -------------------------
-# Middleware (relaxed key check for /api/lead)
+# Middleware (final version)
 # -------------------------
 @app.middleware("http")
 async def protect(request: Request, call_next):
     path = request.url.path
 
-    # Public APIs
+    # ---- public endpoints (no auth) ----
     if (
         path.startswith("/api/availability")
         or path.startswith("/api/chat")
@@ -283,32 +285,32 @@ async def protect(request: Request, call_next):
     ):
         return await call_next(request)
 
-   # Public lead (guarded by header only if a key is set)
-if path == "/api/lead" or path.startswith("/api/lead/"):  # precise match, avoids catching /api/leads
-    header_key = request.headers.get("X-Nexa-Key", "")
-    if NEXA_SERVER_KEY and header_key != NEXA_SERVER_KEY:
-        return JSONResponse({"detail": "unauthorized"}, status_code=401)
-    return await call_next(request)
+    # ---- public lead submit ONLY for /api/lead (NOT /api/leads) ----
+    if path == "/api/lead" or path.startswith("/api/lead/"):
+        header_key = request.headers.get("X-Nexa-Key", "")
+        if NEXA_SERVER_KEY and header_key != NEXA_SERVER_KEY:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        return await call_next(request)
 
-
-    # Admin login page + POST are public
+    # ---- admin login page & login POST are public ----
     if path.startswith("/admin/login") or path.endswith("/admin/login.html"):
         return await call_next(request)
 
-    # API routes require session -> 401 JSON
+    # ---- all other /api/* require admin session ----
     if path.startswith("/api"):
         session = request.cookies.get("admin_session")
         if not session or not verify_session(session):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
-    # Admin HTML routes -> redirect
+    # ---- /admin HTML pages redirect to login when no session ----
     if path.startswith("/admin"):
         session = request.cookies.get("admin_session")
         if not session or not verify_session(session):
             return RedirectResponse(url="/admin/login.html")
         return await call_next(request)
 
+    # everything else
     return await call_next(request)
 
 # -------------------------
@@ -440,7 +442,7 @@ async def api_cancel_booking(booking_id: str):
         return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
     return {"ok": True, "message": "Booking cancelled"}
 
-# Add a quick way to verify CSV reads/write from Admin
+# ----- Debug helpers -----
 @app.post("/api/debug/create_dummy")
 async def create_dummy():
     today = datetime.utcnow().date().isoformat()
@@ -456,42 +458,19 @@ async def create_dummy():
     booking_id = write_lead("pending", lead)
     return {"ok": True, "booking_id": booking_id, "date": today, "time": now_hhmm}
 
-# ----- Login/Logout (cookie hardened) -----
-@app.post("/admin/login")
-async def admin_login(username: str = Form(...), password: str = Form(...)):
-    if username == ADMIN_USER and password == ADMIN_PASS:
-        token = create_session(username)
-        resp = JSONResponse({"ok": True})
-        # Cloudflare/Render friendly cookie
-        resp.set_cookie(
-            "admin_session",
-            token,
-            httponly=True,
-            samesite="none",  # cross-proxy compatible
-            secure=True,      # required for SameSite=None
-            path="/",
-            max_age=3600,
-        )
-        return resp
-    return JSONResponse({"ok": False, "message": "Invalid login"}, status_code=403)
+@app.get("/api/debug/whoami")
+async def debug_whoami(request: Request):
+    tok = request.cookies.get("admin_session")
+    return {"has_cookie": bool(tok), "valid_session": bool(tok and verify_session(tok))}
 
-@app.get("/admin/logout")
-async def admin_logout():
-    resp = JSONResponse({"ok": True})
-    resp.delete_cookie("admin_session", path="/")
-    return resp
+@app.get("/api/debug/leads")
+async def debug_leads():
+    leads = read_all_leads()
+    return {"count": len(leads), "sample": leads[:5]}
 
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_page():
-    path = os.path.join("public", "admin.html")
-    if not os.path.isfile(path):
-        return HTMLResponse("<h2>Admin dashboard is embedded in the public page (open the 🔑 Admin panel).</h2>")
-    return FileResponse(path)
-
-@app.get("/api/leads.csv")
-async def download_csv():
-    _ensure_csv()
-    return FileResponse(LEADS_FILE, media_type="text/csv", filename="leads.csv")
+@app.get("/__routes")
+def list_routes():
+    return sorted([r.path for r in app.router.routes if isinstance(r, APIRoute)])
 
 # -------------------------
 # Chatbot (public)
@@ -525,7 +504,8 @@ def _nice_reply(text: str) -> str:
         req = urllib.request.Request(
             "https://api.openai.com/v1/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {OPENAI_API_KEY}"},
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {OPENAI_API_KEY}"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=20) as resp:
@@ -546,7 +526,7 @@ async def chat(payload: Dict[str, str]):
     # FAQ / small talk
     if any(w in low for w in ["hello", "hi ", "hey", "good morning", "good afternoon", "good evening"]):
         return {"reply": _nice_reply("Hi there! 👋 I can check availability, help you book, or answer quick questions. What can I do for you today?")}
-    if "what kind of business" in low or "who are you" in low or "what is this" in low or "what do you do" in low or "business is this" in low:
+    if "what kind of business" in low or "who are you" in low or "what is this" in low or "what do you do" in low:
         return {"reply": _nice_reply(BUSINESS_DESC)}
     if any(k in low for k in ["hour", "open", "close", "working"]):
         return {"reply": _nice_reply("We’re open from 09:00 to 18:00, Monday to Friday.")}
@@ -578,8 +558,8 @@ async def chat(payload: Dict[str, str]):
         return {"reply": _nice_reply(base)}
 
     # Booking
+    time_rx = re.compile(r"\b([01]\d|2[0-3]):([0-5]\d)\b")
     if "book" in low or "schedule" in low or "appointment" in low:
-        time_rx = re.compile(r"\b([01]\d|2[0-3]):([0-5]\d)\b")
         date_m = DATE_RX.search(msg)
         if not date_m:
             rel = _extract_relative_date(msg)
@@ -631,14 +611,3 @@ async def chat(payload: Dict[str, str]):
         "You can also say “talk to an agent”."
     )
     return {"reply": _nice_reply(help_text)}
-
-# ---------- DEBUG ----------
-@app.get("/api/debug/whoami")
-async def debug_whoami(request: Request):
-    tok = request.cookies.get("admin_session")
-    return {"has_cookie": bool(tok), "valid_session": bool(tok and verify_session(tok))}
-
-@app.get("/api/debug/leads")
-async def debug_leads():
-    leads = read_all_leads()
-    return {"count": len(leads), "sample": leads[:5]}
