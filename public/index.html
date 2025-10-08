@@ -67,6 +67,26 @@
     .chat-input{ display:flex; gap:6px; padding:10px; border-top:1px solid #e5e7eb; background:#fff }
     .chat-input input{ flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:10px; }
     .chat-input button{ padding:10px 12px; border:none; border-radius:10px; background:#004aad; color:#fff; font-weight:700; cursor:pointer; }
+    /* Elegant close button for chat header */
+.chat-close {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+.chat-close:hover {
+  background: rgba(255,255,255,0.35);
+  transform: scale(1.08);
+}
   </style>
 </head>
 <body>
@@ -160,8 +180,10 @@
   <div class="chatbox" id="chatbox" aria-hidden="true">
     <div class="chat-header">
       <strong>Nexa</strong>
-      <button id="chatClose" class="icon-btn" aria-label="Close">✕</button>
-    </div>
+<button id="chatClose" class="chat-close" aria-label="Close">
+  ✕
+</button>
+
 
     <div class="chat-messages" id="chatMessages"></div>
 
