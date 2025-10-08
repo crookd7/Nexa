@@ -283,13 +283,13 @@ async def protect(request: Request, call_next):
     ):
         return await call_next(request)
 
-    # Public lead (guarded by header only if a key is set)
-    if path.startswith("/api/lead"):
-        header_key = request.headers.get("X-Nexa-Key", "")
-        if NEXA_SERVER_KEY:  # enforce only when set in env
-            if header_key != NEXA_SERVER_KEY:
-                return JSONResponse({"detail": "unauthorized"}, status_code=401)
-        return await call_next(request)
+   # Public lead (guarded by header only if a key is set)
+if path == "/api/lead" or path.startswith("/api/lead/"):  # precise match, avoids catching /api/leads
+    header_key = request.headers.get("X-Nexa-Key", "")
+    if NEXA_SERVER_KEY and header_key != NEXA_SERVER_KEY:
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
 
     # Admin login page + POST are public
     if path.startswith("/admin/login") or path.endswith("/admin/login.html"):
