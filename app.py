@@ -11,12 +11,7 @@ from typing import Optional, List, Dict
 
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import (
-    FileResponse,
-    JSONResponse,
-    HTMLResponse,
-    RedirectResponse,
-)
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
 
@@ -30,7 +25,7 @@ BREVO_API_KEY = (os.getenv("BREVO_API_KEY") or "").strip()
 SMTP_FROM = (os.getenv("SMTP_FROM") or "").strip()
 NOTIFY_TO = (os.getenv("NOTIFY_TO") or "").strip()
 
-# Email confirm/cancel link signing
+# Email links signing
 ADMIN_SECRET = (os.getenv("ADMIN_SECRET") or "").strip()
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip()
 
@@ -40,8 +35,11 @@ ADMIN_PASS = (os.getenv("ADMIN_PASS") or "changeme").strip()
 SESSION_SECRET = os.getenv("SESSION_SECRET") or "supersecret123"
 serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
 
-# Optional OpenAI key (only for nicer wording; not required)
+# Optional – friendly rephrasing
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+
+# Business summary (used in FAQ)
+BUSINESS_DESC = (os.getenv("BUSINESS_DESC") or "We provide consultations and scheduling for clients in Sofia.").strip()
 
 # Data
 LEADS_FILE = "leads.csv"
@@ -50,8 +48,9 @@ CSV_HEADER = [
     "service", "appointment_date", "appointment_time"
 ]
 
-BOOKED_STATUSES = {"confirmed"}            # only confirmed blocks a slot
-BUSINESS_HOURS = ("09:00", "18:00")        # UI hint only
+# Availability behavior
+BOOKED_STATUSES = {"confirmed"}
+BUSINESS_HOURS = ("09:00", "18:00")  # UI hint
 
 # =========================
 # FastAPI app
@@ -109,9 +108,9 @@ def read_all_leads() -> List[Dict[str, str]]:
     _ensure_csv()
     out: List[Dict[str, str]] = []
     with open(LEADS_FILE, "r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        _ = next(reader, None)
-        for row in reader:
+        rd = csv.reader(f)
+        _ = next(rd, None)
+        for row in rd:
             if not row or len(row) < len(CSV_HEADER):
                 continue
             out.append(_row_to_dict(row))
@@ -140,9 +139,9 @@ def update_booking_status(booking_id: str, new_status: str) -> bool:
     rows: List[List[str]] = []
     found = False
     with open(LEADS_FILE, "r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        _ = next(reader, None)
-        for row in reader:
+        rd = csv.reader(f)
+        _ = next(rd, None)
+        for row in rd:
             if not row:
                 continue
             if row[0] == booking_id:
@@ -172,7 +171,7 @@ def list_pending_slots_for_date(date_str: str) -> List[str]:
     return sorted(list(dict.fromkeys(pending)))
 
 # =========================
-# Token signing for email links
+# Token signing
 # =========================
 def _sign(action: str, booking_id: str) -> str:
     if not ADMIN_SECRET:
@@ -187,7 +186,7 @@ def _verify(action: str, booking_id: str, token: str) -> bool:
     return hmac.compare_digest(expected, token)
 
 # =========================
-# Email helpers (Brevo HTTP API)
+# Email via Brevo HTTP API
 # =========================
 def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None) -> None:
     if not BREVO_API_KEY or not (SMTP_FROM and NOTIFY_TO):
@@ -212,7 +211,7 @@ def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None) -> N
     )
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
-            print(f"✅ Brevo email sent, status {resp.status}")
+            print(f"✅ Brevo email sent: {resp.status}")
     except Exception as e:
         print(f"❌ Brevo email failed: {e}")
 
@@ -272,7 +271,7 @@ def verify_session(token: str) -> bool:
         return False
 
 # =========================
-# Middleware (401 for API, redirect for admin HTML)
+# Middleware (401 JSON for /api, redirect only for /admin HTML)
 # =========================
 @app.middleware("http")
 async def protect(request: Request, call_next):
@@ -286,7 +285,7 @@ async def protect(request: Request, call_next):
     ):
         return await call_next(request)
 
-    # Public lead submit guarded by header
+    # Public lead submission guarded by header
     if path.startswith("/api/lead"):
         header_key = request.headers.get("X-Nexa-Key", "")
         if not (NEXA_SERVER_KEY and header_key == NEXA_SERVER_KEY):
@@ -304,14 +303,14 @@ async def protect(request: Request, call_next):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
-    # Admin HTML routes -> redirect to login (for human browsing)
+    # Admin HTML routes -> redirect to login (human browsing)
     if path.startswith("/admin"):
         session = request.cookies.get("admin_session")
         if not session or not verify_session(session):
             return RedirectResponse(url="/admin/login.html")
         return await call_next(request)
 
-    # Static and others
+    # Static / other
     return await call_next(request)
 
 # =========================
@@ -391,7 +390,7 @@ async def confirm_booking(booking_id: str, token: str):
     if target["status"] == "confirmed":
         return HTMLResponse("<h2>✅ Already confirmed.</h2>")
 
-    # Avoid double-confirm for same slot
+    # prevent double-booking
     for r in leads:
         if (
             r["booking_id"] != booking_id
@@ -399,11 +398,7 @@ async def confirm_booking(booking_id: str, token: str):
             and r["appointment_time"] == target["appointment_time"]
             and r["status"] == "confirmed"
         ):
-            msg = (
-                "<h2>⚠️ Cannot confirm.</h2>"
-                "<p>This time slot is already <b>confirmed</b> for another booking.</p>"
-            )
-            return HTMLResponse(msg, status_code=409)
+            return HTMLResponse("<h2>⚠️ Slot already confirmed for another booking.</h2>", status_code=409)
 
     if not update_booking_status(booking_id, "confirmed"):
         return HTMLResponse("<h2>Booking not found.</h2>", status_code=404)
@@ -448,19 +443,24 @@ async def api_cancel_booking(booking_id: str):
         return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
     return {"ok": True, "message": "Booking cancelled"}
 
+# ----- Login/Logout -----
 @app.post("/admin/login")
 async def admin_login(username: str = Form(...), password: str = Form(...)):
     if username == ADMIN_USER and password == ADMIN_PASS:
         token = create_session(username)
-        resp = RedirectResponse(url="/admin", status_code=302)
-        resp.set_cookie("admin_session", token, httponly=True, max_age=3600)
+        resp = JSONResponse({"ok": True})
+        # Make cookie robust for fetch + same-origin
+        secure = PUBLIC_BASE_URL.startswith("https://")
+        resp.set_cookie(
+            "admin_session", token, httponly=True, samesite="lax", secure=secure, path="/", max_age=3600
+        )
         return resp
-    return HTMLResponse("<h2>❌ Invalid login</h2>", status_code=403)
+    return JSONResponse({"ok": False, "message": "Invalid login"}, status_code=403)
 
 @app.get("/admin/logout")
 async def admin_logout():
-    resp = RedirectResponse(url="/admin/login.html", status_code=302)
-    resp.delete_cookie("admin_session")
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("admin_session", path="/")
     return resp
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -521,41 +521,41 @@ def _nice_reply(text: str) -> str:
 async def chat(payload: Dict[str, str]):
     """
     Understands:
-      • FAQ/small talk (hours, services, location, pricing, greetings)
+      • FAQ/small talk (hours, services, location, pricing, greetings, 'what kind of business')
       • Availability: 'availability 2025-10-05' or 'availability today/tomorrow'
       • Booking: 'book me ... on 2025-10-05 at 14:30 ...'
     """
-    msg = (payload.get("message") or "").strip()
+    msg = (payload.get("message") or "").trim() if isinstance(payload.get("message"), str) else (payload.get("message") or "")
+    msg = msg.strip()
     if not msg:
-        return {"reply": "Hey! I can check availability, pencil you in, or answer quick questions. Try: ‘availability 2025-10-05’ or ‘book me for a consultation tomorrow at 10:00’."}
+        return {"reply": "Hey! I can check availability, pencil you in, or answer quick questions. Try: ‘availability today’ or ‘book me tomorrow at 10:00’."}
 
     low = msg.lower()
 
-    # Greetings
+    # Greetings / small talk
     if any(w in low for w in ["hello", "hi ", "hey", "good morning", "good afternoon", "good evening"]):
         return {"reply": _nice_reply("Hi there! 👋 I can check availability, help you book, or answer quick questions. What can I do for you today?")}
 
-    # FAQ
+    # FAQ (inc. 'what kind of business')
+    if "what kind of business" in low or "who are you" in low or "what is this" in low or "what do you do" in low or "business is this" in low:
+        return {"reply": _nice_reply(BUSINESS_DESC)}
     if any(k in low for k in ["hour", "open", "close", "working"]):
         return {"reply": _nice_reply("We’re open from 09:00 to 18:00, Monday to Friday.")}
     if any(k in low for k in ["where", "address", "location", "office"]):
         return {"reply": _nice_reply("We’re in Sofia. If you need directions, I can have a human text you details.")}
-    if "service" in low or "offer" in low or "what do you do" in low:
+    if "service" in low or "offer" in low:
         return {"reply": _nice_reply("We offer consultations and scheduling. Tell me what you need and I’ll help book a slot.")}
     if "price" in low or "cost" in low or "fee" in low:
         return {"reply": _nice_reply("Pricing varies by service. I can connect you with a human to confirm a quote.")}
     if "human" in low or "agent" in low or "person" in low or "contact" in low:
-        return {"reply": _nice_reply("Absolutely—tap “Talk to a human” below and leave your phone. We’ll call you shortly.")}
+        return {"reply": _nice_reply("Absolutely—tap “Talk to an agent” and leave your phone. We’ll call you shortly.")}
 
-    # Availability (needs a date: explicit or relative)
+    # Availability (needs a date)
     date_match = DATE_RX.search(msg)
     rel_date = _extract_relative_date(msg)
     if any(k in low for k in ["avail", "free", "slot", "slots"]):
         if not (date_match or rel_date):
-            base = (
-                f"Our hours are {BUSINESS_HOURS[0]}–{BUSINESS_HOURS[1]}, Mon–Fri. "
-                "Tell me a date like 2025-10-05 (or say ‘today’/‘tomorrow’) and I’ll list free times."
-            )
+            base = f"Our hours are {BUSINESS_HOURS[0]}–{BUSINESS_HOURS[1]}, Mon–Fri. Say ‘availability today’, ‘availability tomorrow’, or a date like 2025-10-05."
             return {"reply": _nice_reply(base)}
 
         date_str = date_match.group(1) if date_match else rel_date
@@ -595,8 +595,7 @@ async def chat(payload: Dict[str, str]):
 
         taken = list_taken_slots_for_date(date_str)
         if time_str in taken:
-            base = f"That time ({date_str} {time_str}) is already confirmed. Try another time."
-            return {"reply": _nice_reply(base)}
+            return {"reply": _nice_reply(f"That time ({date_str} {time_str}) is already confirmed. Try another time.")}
 
         lead = Lead(
             name=name, email=None, phone=phone, service=service,
@@ -612,19 +611,16 @@ async def chat(payload: Dict[str, str]):
         subject, text, html = build_owner_email(booking_id, lead, confirm_url, cancel_url)
         send_via_brevo_api(subject, text, html)
 
-        base = (
-            f"Done! I made a pending booking for {name} on {date_str} at {time_str} for ‘{service}’. "
-            "The owner will confirm shortly; once accepted, the slot is blocked."
-        )
+        base = f"Done! I created a pending booking for {name} on {date_str} at {time_str} for ‘{service}’. The owner will confirm shortly."
         return {"reply": _nice_reply(base)}
 
     # Fallback
     help_text = (
         "I can check availability or tentatively book you.\n"
-        "• availability today\n"
+        "• availability today / tomorrow\n"
         "• availability 2025-10-05\n"
         "• book me for consultation tomorrow at 14:30, I'm Alex, phone +359…\n"
-        "You can also say “talk to a human”."
+        "You can also say “talk to an agent”."
     )
     return {"reply": _nice_reply(help_text)}
 
@@ -649,4 +645,4 @@ async def chat_contact(payload: Dict[str, str]):
       </p>
     """
     send_via_brevo_api(subject, text, html)
-    return {"ok": True, "message": "Thanks! A human will contact you shortly."}
+    return {"ok": True, "message": "Thanks! An agent will contact you shortly."}
