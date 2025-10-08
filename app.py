@@ -15,9 +15,9 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Redirect
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
 
-# =========================
+# -------------------------
 # Environment / Config
-# =========================
+# -------------------------
 NEXA_SERVER_KEY = (os.getenv("NEXA_SERVER_KEY") or "").strip()
 
 # Brevo (HTTP API)
@@ -25,7 +25,7 @@ BREVO_API_KEY = (os.getenv("BREVO_API_KEY") or "").strip()
 SMTP_FROM = (os.getenv("SMTP_FROM") or "").strip()
 NOTIFY_TO = (os.getenv("NOTIFY_TO") or "").strip()
 
-# Email links signing (owner confirm/cancel)
+# Email links signing
 ADMIN_SECRET = (os.getenv("ADMIN_SECRET") or "").strip()
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip()
 
@@ -35,26 +35,25 @@ ADMIN_PASS = (os.getenv("ADMIN_PASS") or "changeme").strip()
 SESSION_SECRET = os.getenv("SESSION_SECRET") or "supersecret123"
 serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
 
-# Optional – nicer phrasing for replies (not required)
+# Optional – nicer wording for replies
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
-# Business description (used in FAQ)
+# Business copy for FAQs
 BUSINESS_DESC = (os.getenv("BUSINESS_DESC") or "We provide consultations and scheduling for clients in Sofia.").strip()
 
-# Data
-LEADS_FILE = "leads.csv"
+# Data (ephemeral unless using a Render Disk)
+LEADS_FILE = os.getenv("LEADS_FILE") or "leads.csv"
 CSV_HEADER = [
     "booking_id", "timestamp_utc", "status", "name", "email", "phone",
     "service", "appointment_date", "appointment_time"
 ]
 
-# Availability behavior
-BOOKED_STATUSES = {"confirmed"}             # only these block the calendar
-BUSINESS_HOURS = ("09:00", "18:00")         # UI hint
+BOOKED_STATUSES = {"confirmed"}
+BUSINESS_HOURS = ("09:00", "18:00")
 
-# =========================
-# FastAPI app
-# =========================
+# -------------------------
+# App
+# -------------------------
 app = FastAPI(title="Nexa Lead API")
 app.add_middleware(
     CORSMiddleware,
@@ -64,9 +63,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================
+# -------------------------
 # Models
-# =========================
+# -------------------------
 class Lead(BaseModel):
     name: str = Field(min_length=1)
     email: Optional[str] = None
@@ -83,14 +82,14 @@ class LeadResponse(BaseModel):
     confirm_url: Optional[str] = None
     cancel_url: Optional[str] = None
 
-# =========================
+# -------------------------
 # CSV helpers
-# =========================
+# -------------------------
 def _ensure_csv() -> None:
     if not os.path.exists(LEADS_FILE):
         with open(LEADS_FILE, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(CSV_HEADER)
-        print("📄 Created new leads.csv")
+        print(f"📄 Created CSV {LEADS_FILE}")
 
 def _row_to_dict(row: List[str]) -> Dict[str, str]:
     return {
@@ -133,7 +132,7 @@ def write_lead(status: str, lead: Lead) -> str:
             lead.appointment_date,
             lead.appointment_time,
         ])
-    print(f"📝 Wrote lead {booking_id} {lead.appointment_date} {lead.appointment_time} (status={status})")
+    print(f"📝 Wrote lead {booking_id} {lead.appointment_date} {lead.appointment_time} [{status}]")
     return booking_id
 
 def update_booking_status(booking_id: str, new_status: str) -> bool:
@@ -157,7 +156,7 @@ def update_booking_status(booking_id: str, new_status: str) -> bool:
         w = csv.writer(f)
         w.writerow(CSV_HEADER)
         w.writerows(rows)
-    print(f"🔁 Updated booking {booking_id} -> {new_status}")
+    print(f"🔁 Updated {booking_id} -> {new_status}")
     return True
 
 def list_taken_slots_for_date(date_str: str) -> List[str]:
@@ -174,9 +173,9 @@ def list_pending_slots_for_date(date_str: str) -> List[str]:
             pending.append(r["appointment_time"])
     return sorted(list(dict.fromkeys(pending)))
 
-# =========================
-# Token signing for confirm/cancel links
-# =========================
+# -------------------------
+# Token signing
+# -------------------------
 def _sign(action: str, booking_id: str) -> str:
     if not ADMIN_SECRET:
         return ""
@@ -189,12 +188,11 @@ def _verify(action: str, booking_id: str, token: str) -> bool:
     expected = _sign(action, booking_id)
     return hmac.compare_digest(expected, token)
 
-# =========================
+# -------------------------
 # Email via Brevo HTTP API
-# =========================
+# -------------------------
 def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None) -> None:
     if not BREVO_API_KEY or not (SMTP_FROM and NOTIFY_TO):
-        print("✉️  Skipping email (BREVO_API_KEY/SMTP_FROM/NOTIFY_TO missing)")
         return
     payload = {
         "sender": {"email": SMTP_FROM},
@@ -253,18 +251,13 @@ def build_owner_email(booking_id: str, lead: Lead, confirm_url: str, cancel_url:
         <a href="{confirm_url}" style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700;margin-right:8px">✓ Confirm</a>
         <a href="{cancel_url}" style="display:inline-block;background:#ef4444;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-weight:700">✕ Cancel</a>
       </div>
-      <p style="margin-top:12px;color:#64748b;font-size:13px">
-        If buttons don't work, copy a link:<br/>
-        Confirm: <a href="{confirm_url}">{confirm_url}</a><br/>
-        Cancel: <a href="{cancel_url}">{cancel_url}</a>
-      </p>
     </div>
     """
     return subject, text, html
 
-# =========================
+# -------------------------
 # Admin session helpers
-# =========================
+# -------------------------
 def create_session(user: str) -> str:
     return serializer.dumps({"user": user, "ts": datetime.utcnow().isoformat()})
 
@@ -275,9 +268,9 @@ def verify_session(token: str) -> bool:
     except Exception:
         return False
 
-# =========================
-# Middleware (401 JSON for /api, redirect only for /admin HTML)
-# =========================
+# -------------------------
+# Middleware (relaxed key check for /api/lead)
+# -------------------------
 @app.middleware("http")
 async def protect(request: Request, call_next):
     path = request.url.path
@@ -290,11 +283,12 @@ async def protect(request: Request, call_next):
     ):
         return await call_next(request)
 
-    # Public lead submission guarded by header
+    # Public lead (guarded by header only if a key is set)
     if path.startswith("/api/lead"):
         header_key = request.headers.get("X-Nexa-Key", "")
-        if not (NEXA_SERVER_KEY and header_key == NEXA_SERVER_KEY):
-            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        if NEXA_SERVER_KEY:  # enforce only when set in env
+            if header_key != NEXA_SERVER_KEY:
+                return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
     # Admin login page + POST are public
@@ -308,19 +302,18 @@ async def protect(request: Request, call_next):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)
 
-    # Admin HTML routes -> redirect to login (human browsing)
+    # Admin HTML routes -> redirect
     if path.startswith("/admin"):
         session = request.cookies.get("admin_session")
         if not session or not verify_session(session):
             return RedirectResponse(url="/admin/login.html")
         return await call_next(request)
 
-    # Static / other
     return await call_next(request)
 
-# =========================
+# -------------------------
 # Routes
-# =========================
+# -------------------------
 @app.get("/")
 async def root():
     return RedirectResponse(url="/public/index.html", status_code=302)
@@ -365,7 +358,6 @@ async def create_lead(lead: Lead):
         )
 
     booking_id = write_lead("pending", lead)
-
     confirm_token = _sign("confirm", booking_id)
     cancel_token = _sign("cancel", booking_id)
     base = PUBLIC_BASE_URL or ""
@@ -396,7 +388,6 @@ async def confirm_booking(booking_id: str, token: str):
     if target["status"] == "confirmed":
         return HTMLResponse("<h2>✅ Already confirmed.</h2>")
 
-    # prevent double-booking
     for r in leads:
         if (
             r["booking_id"] != booking_id
@@ -449,19 +440,35 @@ async def api_cancel_booking(booking_id: str):
         return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
     return {"ok": True, "message": "Booking cancelled"}
 
-# ----- Login/Logout -----
+# Add a quick way to verify CSV reads/write from Admin
+@app.post("/api/debug/create_dummy")
+async def create_dummy():
+    today = datetime.utcnow().date().isoformat()
+    now_hhmm = (datetime.utcnow() + timedelta(minutes=5)).strftime("%H:%M")
+    lead = Lead(
+        name="Test Lead",
+        email="",
+        phone="+359000000000",
+        service="test",
+        appointment_date=today,
+        appointment_time=now_hhmm
+    )
+    booking_id = write_lead("pending", lead)
+    return {"ok": True, "booking_id": booking_id, "date": today, "time": now_hhmm}
+
+# ----- Login/Logout (cookie hardened) -----
 @app.post("/admin/login")
-async def admin_login(username: str = Form(...), password: str = Form(...), request: Request = None):
+async def admin_login(username: str = Form(...), password: str = Form(...)):
     if username == ADMIN_USER and password == ADMIN_PASS:
         token = create_session(username)
-        # Force cross-proxy compatibility (Cloudflare etc.)
         resp = JSONResponse({"ok": True})
+        # Cloudflare/Render friendly cookie
         resp.set_cookie(
             "admin_session",
             token,
             httponly=True,
-            samesite="none",   # requires HTTPS
-            secure=True,
+            samesite="none",  # cross-proxy compatible
+            secure=True,      # required for SameSite=None
             path="/",
             max_age=3600,
         )
@@ -486,9 +493,9 @@ async def download_csv():
     _ensure_csv()
     return FileResponse(LEADS_FILE, media_type="text/csv", filename="leads.csv")
 
-# =========================
-# Chatbot endpoint (public)
-# =========================
+# -------------------------
+# Chatbot (public)
+# -------------------------
 DATE_RX = re.compile(r"\b(20\d{2}-\d{2}-\d{2})\b")
 TIME_RX = re.compile(r"\b([01]\d|2[0-3]):([0-5]\d)\b")
 
@@ -530,24 +537,15 @@ def _nice_reply(text: str) -> str:
 
 @app.post("/api/chat")
 async def chat(payload: Dict[str, str]):
-    """
-    Understands:
-      • FAQ/small talk (hours, services, location, pricing, greetings, 'what kind of business')
-      • Availability: 'availability 2025-10-05' or 'availability today/tomorrow'
-      • Booking: 'book me ... on 2025-10-05 at 14:30 ...'
-    """
-    raw = payload.get("message")
-    msg = (raw if isinstance(raw, str) else "").strip()
+    msg = (payload.get("message") or "").strip()
     if not msg:
         return {"reply": "Hey! I can check availability, pencil you in, or answer quick questions. Try: ‘availability today’ or ‘book me tomorrow at 10:00’."}
 
     low = msg.lower()
 
-    # Greetings / small talk
-    if any(w in low for w in ["hello", " hi", "hey", "good morning", "good afternoon", "good evening"]):
+    # FAQ / small talk
+    if any(w in low for w in ["hello", "hi ", "hey", "good morning", "good afternoon", "good evening"]):
         return {"reply": _nice_reply("Hi there! 👋 I can check availability, help you book, or answer quick questions. What can I do for you today?")}
-
-    # FAQ (incl. 'what kind of business')
     if "what kind of business" in low or "who are you" in low or "what is this" in low or "what do you do" in low or "business is this" in low:
         return {"reply": _nice_reply(BUSINESS_DESC)}
     if any(k in low for k in ["hour", "open", "close", "working"]):
@@ -561,14 +559,13 @@ async def chat(payload: Dict[str, str]):
     if "human" in low or "agent" in low or "person" in low or "contact" in low:
         return {"reply": _nice_reply("Absolutely—tap “Talk to an agent” and leave your phone. We’ll call you shortly.")}
 
-    # Availability (needs a date)
+    # Availability
     date_match = DATE_RX.search(msg)
     rel_date = _extract_relative_date(msg)
     if any(k in low for k in ["avail", "free", "slot", "slots"]):
         if not (date_match or rel_date):
             base = f"Our hours are {BUSINESS_HOURS[0]}–{BUSINESS_HOURS[1]}, Mon–Fri. Say ‘availability today’, ‘availability tomorrow’, or a date like 2025-10-05."
             return {"reply": _nice_reply(base)}
-
         date_str = date_match.group(1) if date_match else rel_date
         taken = list_taken_slots_for_date(date_str)
         pending = list_pending_slots_for_date(date_str)
@@ -577,11 +574,12 @@ async def chat(payload: Dict[str, str]):
         else:
             t = ", ".join(taken) if taken else "none"
             p = ", ".join(pending) if pending else "none"
-            base = f"{date_str} — Confirmed (blocked): {t}. Pending requests: {p}. Tell me a time and I can tentatively book you."
+            base = f"{date_str} — Confirmed (blocked): {t}. Pending: {p}. Tell me a time and I can tentatively book you."
         return {"reply": _nice_reply(base)}
 
-    # Booking intent
+    # Booking
     if "book" in low or "schedule" in low or "appointment" in low:
+        time_rx = re.compile(r"\b([01]\d|2[0-3]):([0-5]\d)\b")
         date_m = DATE_RX.search(msg)
         if not date_m:
             rel = _extract_relative_date(msg)
@@ -591,7 +589,7 @@ async def chat(payload: Dict[str, str]):
         else:
             date_str = date_m.group(1)
 
-        time_m = TIME_RX.search(msg)
+        time_m = time_rx.search(msg)
         if not time_m:
             return {"reply": _nice_reply("Please include a time (HH:MM), e.g. 14:30.")}
 
@@ -625,7 +623,6 @@ async def chat(payload: Dict[str, str]):
         base = f"Done! I created a pending booking for {name} on {date_str} at {time_str} for ‘{service}’. The owner will confirm shortly."
         return {"reply": _nice_reply(base)}
 
-    # Fallback
     help_text = (
         "I can check availability or tentatively book you.\n"
         "• availability today / tomorrow\n"
@@ -635,30 +632,7 @@ async def chat(payload: Dict[str, str]):
     )
     return {"reply": _nice_reply(help_text)}
 
-# =========================
-# Chat → human callback (public)
-# =========================
-@app.post("/api/chat-contact")
-async def chat_contact(payload: Dict[str, str]):
-    name = (payload.get("name") or "").strip() or "Guest"
-    phone = (payload.get("phone") or "").strip()
-    msg = (payload.get("message") or "").strip()
-    if not phone:
-        return JSONResponse({"ok": False, "message": "Phone is required."}, status_code=400)
-
-    subject = "Chat: Callback request"
-    text = f"Callback request from chat:\nName: {name}\nPhone: {phone}\nMessage: {msg or '(none)'}"
-    html = f"""
-      <h3>Callback request from chat</h3>
-      <p><b>Name:</b> {name}<br/>
-         <b>Phone:</b> {phone}<br/>
-         <b>Message:</b> {msg or '(none)'}
-      </p>
-    """
-    send_via_brevo_api(subject, text, html)
-    return {"ok": True, "message": "Thanks! An agent will contact you shortly."}
-
-# ---------- DEBUG (temporary; remove when happy) ----------
+# ---------- DEBUG ----------
 @app.get("/api/debug/whoami")
 async def debug_whoami(request: Request):
     tok = request.cookies.get("admin_session")
