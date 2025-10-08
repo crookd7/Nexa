@@ -153,6 +153,7 @@
           <input id="filterDate" type="date" class="adm-input" style="max-width:180px; margin:0" />
           <button id="refreshBtn" class="btn small" style="background:#0ea5e9">Refresh</button>
           <button id="clearFilter" class="btn small" style="background:#94a3b8">Clear</button>
+          <button id="makeDummy" class="btn small" style="background:#22c55e">Add test</button>
         </div>
         <div id="countInfo" class="note"></div>
         <table id="leadsTable">
@@ -209,7 +210,7 @@
 
   <script>
     // ====== CONFIG ======
-    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match env NEXA_SERVER_KEY
+    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match env NEXA_SERVER_KEY if you set it
     const TIME_STEP_MIN = 15;
 
     // ====== Booking helpers ======
@@ -271,6 +272,10 @@
         });
         const raw = await res.text(); let data; try{ data = JSON.parse(raw) } catch{ data = { detail: raw } }
         if (!res.ok) {
+          if (res.status === 401) {
+            status.textContent = "Booking blocked (401). Tip: leave NEXA_SERVER_KEY empty in Render OR ensure it matches NEXA_KEY in this page.";
+            return;
+          }
           if (res.status === 409) {
             await fetchAvailability(body.appointment_date);
             status.textContent = data.message || "That time is already confirmed. Please choose another.";
@@ -360,6 +365,17 @@
     document.getElementById('clearFilter').addEventListener('click', () => {
       document.getElementById('filterDate').value = '';
       loadLeads();
+    });
+
+    document.getElementById('makeDummy').addEventListener('click', async () => {
+      const res = await fetch('/api/debug/create_dummy', { method:'POST', credentials:'include' });
+      const data = await res.json().catch(()=>({}));
+      if (res.ok && data.ok) {
+        alert(`Added test lead: ${data.date} ${data.time}`);
+        loadLeads();
+      } else {
+        alert('Could not add test lead (are you logged in?)');
+      }
     });
 
     async function loadLeads(){
@@ -464,13 +480,13 @@
       sendChat();
     }
 
-    // Local instant FAQ (improves “regular questions”)
+    // Quick local FAQ
     function localFAQ(q){
       const s = q.toLowerCase().trim();
       if (/^(hi|hello|hey)\b/.test(s)) return "Hi there! 👋 I can check availability, help you book, or answer quick questions.";
       if (/(what kind of business|who are you|what is this|what do you do|business is this)/.test(s)) return "We provide consultations and scheduling for clients in Sofia.";
       if (/(hour|open|close|working)/.test(s)) return "We’re open from 09:00 to 18:00, Monday–Friday.";
-      if (/(where|address|location|office|map|directions)/.test(s)) return "We’re in Sofia. Need directions? I can have an agent text you the details.";
+      if (/(where|address|location|office|map|directions)/.test(s)) return "We’re in Sofia. Need directions? An agent can text you the details.";
       if (/(service|offer|do you do)/.test(s)) return "We offer consultations and scheduling. Tell me what you need and I’ll help book a slot.";
       if (/(price|cost|fee|how much)/.test(s)) return "Pricing varies by service. I can connect you with an agent for a quote.";
       if (/(human|agent|person|contact|call me)/.test(s)) { openHumanForm(); return "Sure—leave your name and phone and an agent will call you shortly."; }
