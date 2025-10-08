@@ -46,10 +46,31 @@
     .btn.small{ padding:6px 8px; font-size:12px; border-radius:6px; }
     .btn.confirm{ background:#16a34a; }
     .btn.cancel{ background:#ef4444; }
+
+    /* --- Chat widget --- */
+    .chat-launcher{
+      position:fixed; right:16px; bottom:16px; z-index:9999;
+      border:none; border-radius:999px; padding:12px 16px; font-weight:700;
+      background:#004aad; color:#fff; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.15);
+    }
+    .chatbox{
+      position:fixed; right:16px; bottom:76px; width:320px; max-width:90vw; height:420px;
+      background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 16px 36px rgba(0,0,0,.18);
+      display:none; flex-direction:column; overflow:hidden; z-index:9998;
+    }
+    .chatbox.open{ display:flex; }
+    .chat-header{ background:#0f172a; color:#fff; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; }
+    .chat-messages{ flex:1; overflow:auto; padding:10px; background:#f8fafc }
+    .msg{ margin:6px 0; max-width:80%; padding:8px 10px; border-radius:12px; line-height:1.3; }
+    .msg.user{ margin-left:auto; background:#dbeafe; }
+    .msg.bot{ background:#ffffff; border:1px solid #e5e7eb; }
+    .chat-input{ display:flex; gap:6px; padding:10px; border-top:1px solid #e5e7eb; background:#fff }
+    .chat-input input{ flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:10px; }
+    .chat-input button{ padding:10px 12px; border:none; border-radius:10px; background:#004aad; color:#fff; font-weight:700; cursor:pointer; }
   </style>
 </head>
 <body>
-  <!-- Public page content -->
+  <!-- Admin button -->
   <button id="adminBtn">🔑 Admin</button>
 
   <div class="container">
@@ -134,10 +155,23 @@
     </div>
   </div>
 
+  <!-- Floating Chat widget -->
+  <button class="chat-launcher" id="chatLauncher">💬 Chat</button>
+  <div class="chatbox" id="chatbox" aria-hidden="true">
+    <div class="chat-header">
+      <strong>Assistant</strong>
+      <button id="chatClose" class="btn small" style="background:#475569;color:#fff">Close ✕</button>
+    </div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input">
+      <input id="chatInput" placeholder="Ask about availability or say 'book me…'"/>
+      <button id="chatSend">Send</button>
+    </div>
+  </div>
+
   <script>
     // ====== CONFIG ======
-    // Must exactly match NEXA_SERVER_KEY in Render env
-    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead";
+    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match env NEXA_SERVER_KEY
     const TIME_STEP_MIN = 15;
 
     // ====== Booking helpers ======
@@ -194,10 +228,7 @@
       try{
         const res = await fetch('/api/lead', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Nexa-Key': NEXA_KEY          // ← REQUIRED for /api/lead
-          },
+          headers: { 'Content-Type': 'application/json', 'X-Nexa-Key': NEXA_KEY },
           body: JSON.stringify(body)
         });
         const raw = await res.text(); let data; try{ data = JSON.parse(raw) } catch{ data = { detail: raw } }
@@ -237,7 +268,6 @@
     openBtn.addEventListener('click', ()=> { panel.classList.add('open'); checkSessionAndRender(); });
     closeBtn.addEventListener('click', ()=> panel.classList.remove('open'));
 
-    // Login (session cookie)
     document.getElementById('admLoginBtn').addEventListener('click', async ()=>{
       const u = document.getElementById('admUser').value.trim();
       const p = document.getElementById('admPass').value;
@@ -278,7 +308,6 @@
       }
     }
 
-    // Admin table
     async function loadLeads(){
       const res = await fetch('/api/leads', { credentials:'include' });
       if (!res.ok){ document.getElementById('dashMsg').textContent = "Session expired. Please log in."; return; }
@@ -321,7 +350,6 @@
     document.getElementById('refreshBtn').addEventListener('click', loadLeads);
     document.getElementById('filterDate').addEventListener('change', loadLeads);
 
-    // Admin actions
     window.confirmBooking = async function(id){
       if(!confirm("Confirm this booking?")) return;
       const res = await fetch(`/api/confirm/${id}`, { method:"POST", credentials:'include' });
@@ -340,6 +368,56 @@
       const d = document.getElementById('date').value;
       if (d) fetchAvailability(d);
     }
+
+    // ====== Chat widget logic ======
+    const chatBtn = document.getElementById('chatLauncher');
+    const chatBox = document.getElementById('chatbox');
+    const chatClose = document.getElementById('chatClose');
+    const chatInput = document.getElementById('chatInput');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatSend = document.getElementById('chatSend');
+
+    function addMsg(text, who='bot'){
+      const div = document.createElement('div');
+      div.className = 'msg ' + who;
+      div.textContent = text;
+      chatMessages.appendChild(div);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function openChat(){
+      chatBox.classList.add('open');
+      if (!chatMessages.dataset.greeted){
+        addMsg("Hi! Ask me about availability (e.g. 'availability 2025-10-05') or say 'book me…' with your name, phone, service, date and time.");
+        chatMessages.dataset.greeted = '1';
+      }
+      chatInput.focus();
+    }
+    function closeChat(){ chatBox.classList.remove('open'); }
+
+    chatBtn.addEventListener('click', openChat);
+    chatClose.addEventListener('click', closeChat);
+
+    async function sendChat(){
+      const msg = chatInput.value.trim();
+      if(!msg) return;
+      addMsg(msg, 'user');
+      chatInput.value = '';
+      try{
+        const res = await fetch('/api/chat', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        addMsg(data.reply || 'Sorry, I did not get that.', 'bot');
+      }catch(e){
+        addMsg('Network error, please try again.', 'bot');
+      }
+    }
+
+    chatInput.addEventListener('keydown', (e)=> { if(e.key==='Enter') sendChat(); });
+    chatSend.addEventListener('click', sendChat);
   </script>
 </body>
 </html>
