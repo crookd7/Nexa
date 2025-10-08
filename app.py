@@ -25,7 +25,7 @@ BREVO_API_KEY = (os.getenv("BREVO_API_KEY") or "").strip()
 SMTP_FROM = (os.getenv("SMTP_FROM") or "").strip()
 NOTIFY_TO = (os.getenv("NOTIFY_TO") or "").strip()
 
-# Email links signing
+# Email links signing (owner confirm/cancel)
 ADMIN_SECRET = (os.getenv("ADMIN_SECRET") or "").strip()
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").strip()
 
@@ -35,10 +35,10 @@ ADMIN_PASS = (os.getenv("ADMIN_PASS") or "changeme").strip()
 SESSION_SECRET = os.getenv("SESSION_SECRET") or "supersecret123"
 serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
 
-# Optional – friendly rephrasing
+# Optional – nicer phrasing for replies (not required)
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
-# Business summary (used in FAQ)
+# Business description (used in FAQ)
 BUSINESS_DESC = (os.getenv("BUSINESS_DESC") or "We provide consultations and scheduling for clients in Sofia.").strip()
 
 # Data
@@ -49,8 +49,8 @@ CSV_HEADER = [
 ]
 
 # Availability behavior
-BOOKED_STATUSES = {"confirmed"}
-BUSINESS_HOURS = ("09:00", "18:00")  # UI hint
+BOOKED_STATUSES = {"confirmed"}             # only these block the calendar
+BUSINESS_HOURS = ("09:00", "18:00")         # UI hint
 
 # =========================
 # FastAPI app
@@ -90,6 +90,7 @@ def _ensure_csv() -> None:
     if not os.path.exists(LEADS_FILE):
         with open(LEADS_FILE, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(CSV_HEADER)
+        print("📄 Created new leads.csv")
 
 def _row_to_dict(row: List[str]) -> Dict[str, str]:
     return {
@@ -114,6 +115,7 @@ def read_all_leads() -> List[Dict[str, str]]:
             if not row or len(row) < len(CSV_HEADER):
                 continue
             out.append(_row_to_dict(row))
+    print(f"📖 Loaded {len(out)} leads from CSV")
     return out
 
 def write_lead(status: str, lead: Lead) -> str:
@@ -131,6 +133,7 @@ def write_lead(status: str, lead: Lead) -> str:
             lead.appointment_date,
             lead.appointment_time,
         ])
+    print(f"📝 Wrote lead {booking_id} {lead.appointment_date} {lead.appointment_time} (status={status})")
     return booking_id
 
 def update_booking_status(booking_id: str, new_status: str) -> bool:
@@ -154,6 +157,7 @@ def update_booking_status(booking_id: str, new_status: str) -> bool:
         w = csv.writer(f)
         w.writerow(CSV_HEADER)
         w.writerows(rows)
+    print(f"🔁 Updated booking {booking_id} -> {new_status}")
     return True
 
 def list_taken_slots_for_date(date_str: str) -> List[str]:
@@ -171,7 +175,7 @@ def list_pending_slots_for_date(date_str: str) -> List[str]:
     return sorted(list(dict.fromkeys(pending)))
 
 # =========================
-# Token signing
+# Token signing for confirm/cancel links
 # =========================
 def _sign(action: str, booking_id: str) -> str:
     if not ADMIN_SECRET:
@@ -190,6 +194,7 @@ def _verify(action: str, booking_id: str, token: str) -> bool:
 # =========================
 def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None) -> None:
     if not BREVO_API_KEY or not (SMTP_FROM and NOTIFY_TO):
+        print("✉️  Skipping email (BREVO_API_KEY/SMTP_FROM/NOTIFY_TO missing)")
         return
     payload = {
         "sender": {"email": SMTP_FROM},
@@ -360,6 +365,7 @@ async def create_lead(lead: Lead):
         )
 
     booking_id = write_lead("pending", lead)
+
     confirm_token = _sign("confirm", booking_id)
     cancel_token = _sign("cancel", booking_id)
     base = PUBLIC_BASE_URL or ""
@@ -445,14 +451,19 @@ async def api_cancel_booking(booking_id: str):
 
 # ----- Login/Logout -----
 @app.post("/admin/login")
-async def admin_login(username: str = Form(...), password: str = Form(...)):
+async def admin_login(username: str = Form(...), password: str = Form(...), request: Request = None):
     if username == ADMIN_USER and password == ADMIN_PASS:
         token = create_session(username)
+        # Force cross-proxy compatibility (Cloudflare etc.)
         resp = JSONResponse({"ok": True})
-        # Make cookie robust for fetch + same-origin
-        secure = PUBLIC_BASE_URL.startswith("https://")
         resp.set_cookie(
-            "admin_session", token, httponly=True, samesite="lax", secure=secure, path="/", max_age=3600
+            "admin_session",
+            token,
+            httponly=True,
+            samesite="none",   # requires HTTPS
+            secure=True,
+            path="/",
+            max_age=3600,
         )
         return resp
     return JSONResponse({"ok": False, "message": "Invalid login"}, status_code=403)
@@ -525,18 +536,18 @@ async def chat(payload: Dict[str, str]):
       • Availability: 'availability 2025-10-05' or 'availability today/tomorrow'
       • Booking: 'book me ... on 2025-10-05 at 14:30 ...'
     """
-    msg = (payload.get("message") or "").trim() if isinstance(payload.get("message"), str) else (payload.get("message") or "")
-    msg = msg.strip()
+    raw = payload.get("message")
+    msg = (raw if isinstance(raw, str) else "").strip()
     if not msg:
         return {"reply": "Hey! I can check availability, pencil you in, or answer quick questions. Try: ‘availability today’ or ‘book me tomorrow at 10:00’."}
 
     low = msg.lower()
 
     # Greetings / small talk
-    if any(w in low for w in ["hello", "hi ", "hey", "good morning", "good afternoon", "good evening"]):
+    if any(w in low for w in ["hello", " hi", "hey", "good morning", "good afternoon", "good evening"]):
         return {"reply": _nice_reply("Hi there! 👋 I can check availability, help you book, or answer quick questions. What can I do for you today?")}
 
-    # FAQ (inc. 'what kind of business')
+    # FAQ (incl. 'what kind of business')
     if "what kind of business" in low or "who are you" in low or "what is this" in low or "what do you do" in low or "business is this" in low:
         return {"reply": _nice_reply(BUSINESS_DESC)}
     if any(k in low for k in ["hour", "open", "close", "working"]):
@@ -646,3 +657,14 @@ async def chat_contact(payload: Dict[str, str]):
     """
     send_via_brevo_api(subject, text, html)
     return {"ok": True, "message": "Thanks! An agent will contact you shortly."}
+
+# ---------- DEBUG (temporary; remove when happy) ----------
+@app.get("/api/debug/whoami")
+async def debug_whoami(request: Request):
+    tok = request.cookies.get("admin_session")
+    return {"has_cookie": bool(tok), "valid_session": bool(tok and verify_session(tok))}
+
+@app.get("/api/debug/leads")
+async def debug_leads():
+    leads = read_all_leads()
+    return {"count": len(leads), "sample": leads[:5]}
