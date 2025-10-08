@@ -68,7 +68,7 @@
     .chat-input input{ flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:10px; }
     .chat-input button{ padding:10px 12px; border:none; border-radius:10px; background:#004aad; color:#fff; font-weight:700; cursor:pointer; }
 
-    /* Chat close button (elegant) */
+    /* Elegant tiny close */
     .chat-close {
       background: rgba(255,255,255,0.2);
       border: 1px solid rgba(255,255,255,0.3);
@@ -79,6 +79,9 @@
       font-size: 14px; line-height: 1; cursor: pointer; transition: all .2s ease;
     }
     .chat-close:hover { background: rgba(255,255,255,0.35); transform: scale(1.08); }
+
+    /* Chips row collapsed */
+    .chips-collapsed { display:none !important; }
   </style>
 </head>
 <body>
@@ -176,12 +179,16 @@
 
     <div class="chat-messages" id="chatMessages"></div>
 
-    <!-- quick replies -->
+    <!-- quick replies + toggle -->
+    <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid #e5e7eb;padding:6px 10px;background:#fff">
+      <small id="chipToggle" style="cursor:pointer;color:#334155">Hide options</small>
+      <span style="font-size:12px;color:#94a3b8">tips</span>
+    </div>
     <div id="chatChips" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid #e5e7eb;background:#fff">
       <button class="btn small" onclick="sendChip('availability ' + new Date().toISOString().slice(0,10))">Today’s availability</button>
       <button class="btn small" onclick="sendChip('availability tomorrow')">Tomorrow’s availability</button>
       <button class="btn small" onclick="sendChip('What services do you offer?')">Services</button>
-      <button class="btn small" onclick="openHumanForm()">Talk to a human</button>
+      <button class="btn small" onclick="openHumanForm()">Talk to an agent</button>
     </div>
 
     <!-- human contact form -->
@@ -315,14 +322,15 @@
       const form = new FormData();
       form.append("username", u);
       form.append("password", p);
-      const res = await fetch('/admin/login', { method:'POST', body: form, credentials: 'include', redirect: 'follow' });
-      if (res.redirected || res.ok) {
+      const res = await fetch('/admin/login', { method:'POST', body: form, credentials: 'include' });
+      const data = await res.json().catch(()=>({}));
+      if (res.ok && data.ok) {
         loginView.style.display = 'none';
         dashView.style.display = 'block';
         logoutBtn.style.display = 'inline-block';
         loadLeads();
       } else {
-        admMsg.textContent = "Invalid login.";
+        admMsg.textContent = (data && data.message) || "Invalid login.";
       }
     });
 
@@ -422,6 +430,8 @@
     const chatInput = document.getElementById('chatInput');
     const chatMessages = document.getElementById('chatMessages');
     const chatSend = document.getElementById('chatSend');
+    const chipToggle = document.getElementById('chipToggle');
+    const chatChips = document.getElementById('chatChips');
 
     function addMsg(text, who='bot'){
       const div = document.createElement('div');
@@ -444,23 +454,28 @@
     chatBtn.addEventListener('click', openChat);
     chatClose.addEventListener('click', closeChat);
 
+    chipToggle.addEventListener('click', () => {
+      chatChips.classList.toggle('chips-collapsed');
+      chipToggle.textContent = chatChips.classList.contains('chips-collapsed') ? 'Show options' : 'Hide options';
+    });
+
     function sendChip(text){
       chatInput.value = text;
       sendChat();
     }
 
-    // Local instant FAQ
+    // Local instant FAQ (improves “regular questions”)
     function localFAQ(q){
       const s = q.toLowerCase().trim();
       if (/^(hi|hello|hey)\b/.test(s)) return "Hi there! 👋 I can check availability, help you book, or answer quick questions.";
+      if (/(what kind of business|who are you|what is this|what do you do|business is this)/.test(s)) return "We provide consultations and scheduling for clients in Sofia.";
       if (/(hour|open|close|working)/.test(s)) return "We’re open from 09:00 to 18:00, Monday–Friday.";
-      if (/(where|address|location|office|map|directions)/.test(s)) return "We’re in Sofia. Need directions? I can have a human text you exact details.";
-      if (/(service|offer|do you do|what do you do)/.test(s)) return "We offer consultations and scheduling. Tell me what you need and I’ll help book a slot.";
-      if (/(price|cost|fee|how much)/.test(s)) return "Pricing varies by service. I can connect you with a human to confirm a quote.";
-      if (/(human|agent|person|contact|call me)/.test(s)) { openHumanForm(); return "Sure—leave your name and phone and we’ll call you shortly."; }
-      // availability without date → helpful hint
+      if (/(where|address|location|office|map|directions)/.test(s)) return "We’re in Sofia. Need directions? I can have an agent text you the details.";
+      if (/(service|offer|do you do)/.test(s)) return "We offer consultations and scheduling. Tell me what you need and I’ll help book a slot.";
+      if (/(price|cost|fee|how much)/.test(s)) return "Pricing varies by service. I can connect you with an agent for a quote.";
+      if (/(human|agent|person|contact|call me)/.test(s)) { openHumanForm(); return "Sure—leave your name and phone and an agent will call you shortly."; }
       if (/(avail|free slot|free slots|slot|slots)/.test(s) && !/\b20\d{2}-\d{2}-\d{2}\b/.test(s) && !/(today|tomorrow|tmrw)/.test(s)) {
-        return "Our hours are 09:00–18:00, Mon–Fri. Ask me for a date like ‘availability today’ or ‘availability 2025-10-05’.";
+        return "Our hours are 09:00–18:00, Mon–Fri. Ask me ‘availability today’, ‘availability tomorrow’, or a specific date like ‘availability 2025-10-05’.";
       }
       return null;
     }
@@ -482,7 +497,7 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.message || 'Failed');
         status.textContent = data.message || 'Request sent.';
-        addMsg("Got it! A human will reach out shortly. Anything else I can help with meanwhile?", 'bot');
+        addMsg("Got it! An agent will reach out shortly. Anything else I can help with meanwhile?", 'bot');
       }catch(e){
         status.textContent = 'Sorry—could not send. Please check your phone number and try again.';
       }
