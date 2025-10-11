@@ -40,6 +40,9 @@ serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
 # Business copy for FAQs
+BUSINESS_NAME = (os.getenv("BUSINESS_NAME") or "Nexa").strip()
+LOGO_URL = (os.getenv("LOGO_URL") or "").strip()
+PROMO_CODE = (os.getenv("PROMO_CODE") or "NEXA10").strip()
 BUSINESS_DESC = (os.getenv("BUSINESS_DESC") or
                  "We provide consultations and scheduling for clients in Sofia.").strip()
 
@@ -193,11 +196,22 @@ def _verify(action: str, booking_id: str, token: str) -> bool:
 # -------------------------
 # Email via Brevo HTTP API
 # -------------------------
+def _wrap_email_html(title: str, inner_html: str) -> str:
+    head_logo = f"<img src='{LOGO_URL}' alt='{BUSINESS_NAME}' style='height:36px;margin:16px 0'/>" if LOGO_URL else ""
+    return (
+        "<div style='font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a'>"
+        f"{head_logo}"
+        f"<h2 style='margin:8px 0 16px'>{title}</h2>"
+        f"<div style='background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:16px'>{inner_html}</div>"
+        f"<p style='color:#64748b;margin-top:16px'>{BUSINESS_NAME}</p>"
+        "</div>"
+    )
+
 def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None, to_email: Optional[str] = None) -> None:
     if not BREVO_API_KEY or not (SMTP_FROM and NOTIFY_TO):
         return
     payload = {
-        "sender": {"email": SMTP_FROM},
+        "sender": {"email": SMTP_FROM, "name": BUSINESS_NAME},
         "to": [{"email": (to_email or NOTIFY_TO)}],
         "subject": subject,
         "textContent": text,
@@ -323,6 +337,15 @@ async def root():
 @app.get("/public/{path:path}")
 async def public_files(path: str):
     file_path = os.path.join("public", path)
+    if path == 'admin.html':
+        session = request.cookies.get('admin_session') if isinstance(request, Request) else None
+        # deny direct admin.html access via this route if no session
+        try:
+            if not session or not verify_session(session):
+                return RedirectResponse(url='/admin/login.html', status_code=302)
+        except Exception:
+            return RedirectResponse(url='/admin/login.html', status_code=302)
+    
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file_path)
@@ -441,14 +464,28 @@ async def api_confirm_booking(booking_id: str):
             if pay_link:
                 # include booking id and 10% off marker
                 pay_link = f"{pay_link}?booking={booking_id}&discount=10"
-            subject = "Your booking is confirmed"
-            txt = f"Hi {target.get('name')},\n\nYour booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} is confirmed.\n"
-            if pay_link:
-                txt += f"Optional: pay now with 10% off: {pay_link}\n"
-            html = f"<p>Hi {target.get('name')},</p><p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> is confirmed.</p>"
-            if pay_link:
-                html += f"<p><a href='{pay_link}'>Pay now with 10% off</a></p>"
-            send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
+            subject = f"Your booking is confirmed"
+txt = (
+    f"Hi {target.get('name')},
+
+"
+    f"Your booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} is confirmed.
+"
+)
+promo = PROMO_CODE
+pay_link = (os.getenv("PAYMENT_LINK_BASE") or "").strip()
+if pay_link:
+    pay_link = f"{pay_link}?booking={booking_id}&discount=10&code={promo}"
+    txt += f"Optional: pay now with 10% off using code {promo}: {pay_link}
+"
+inner = (
+    f"<p>Hi {target.get('name')},</p>"
+    f"<p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> is confirmed.</p>"
+    + (f"<p><a href='{pay_link}'>Pay now with 10% off (code {promo})</a></p>" if pay_link else "")
+)
+html = _wrap_email_html("Booking Confirmed", inner)
+send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
+subject, txt, html, to_email=target.get("email"))
     except Exception as e:
         print("Email confirm send failed:", e)
 
@@ -465,10 +502,23 @@ async def api_cancel_booking(booking_id: str):
         leads = read_all_leads()
         target = next((r for r in leads if r["booking_id"] == booking_id), None)
         if target and target.get("email"):
-            subject = "Your booking was cancelled"
-            txt = f"Hi {target.get('name')},\n\nYour booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} was cancelled.\nIf this is unexpected, reply to this email."
-            html = f"<p>Hi {target.get('name')},</p><p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> was cancelled.</p><p>If this is unexpected, reply to this email.</p>"
-            send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
+            subject = f"Your booking was cancelled"
+txt = (
+    f"Hi {target.get('name')},
+
+"
+    f"Your booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} was cancelled.
+"
+    "If this is unexpected, reply to this email."
+)
+inner = (
+    f"<p>Hi {target.get('name')},</p>"
+    f"<p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> was cancelled.</p>"
+    f"<p>If this is unexpected, reply to this email.</p>"
+)
+html = _wrap_email_html("Booking Cancelled", inner)
+send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
+subject, txt, html, to_email=target.get("email"))
     except Exception as e:
         print("Email cancel send failed:", e)
 
@@ -643,3 +693,31 @@ async def chat(payload: Dict[str, str]):
         "You can also say “talk to an agent”."
     )
     return {"reply": _nice_reply(help_text)}
+
+@app.get('/api/export')
+async def export_csv():
+    _ensure_csv()
+    return FileResponse(LEADS_FILE, filename='leads.csv', media_type='text/csv')
+
+@app.post("/admin/login")
+async def admin_login(request: Request):
+    form = await request.form()
+    username = (form.get("username") or "").strip()
+    password = (form.get("password") or "").strip()
+    if username == ADMIN_USER and password == ADMIN_PASS:
+        token = create_session(username)
+        resp = RedirectResponse(url="/public/admin.html", status_code=302)
+        # cookie for 7 days
+        resp.set_cookie("admin_session", token, max_age=60*60*24*7, httponly=True, samesite="Lax")
+        return resp
+    return RedirectResponse(url="/admin/login.html?error=Invalid+credentials", status_code=302)
+
+@app.get("/admin/logout")
+async def admin_logout():
+    resp = RedirectResponse(url="/admin/login.html", status_code=302)
+    resp.delete_cookie("admin_session")
+    return resp
+
+@app.post('/api/admin/login')
+async def admin_login_alias(request: Request):
+    return await admin_login(request)
