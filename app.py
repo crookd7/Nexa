@@ -193,12 +193,12 @@ def _verify(action: str, booking_id: str, token: str) -> bool:
 # -------------------------
 # Email via Brevo HTTP API
 # -------------------------
-def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None) -> None:
+def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None, to_email: Optional[str] = None) -> None:
     if not BREVO_API_KEY or not (SMTP_FROM and NOTIFY_TO):
         return
     payload = {
         "sender": {"email": SMTP_FROM},
-        "to": [{"email": NOTIFY_TO}],
+        "to": [{"email": (to_email or NOTIFY_TO)}],
         "subject": subject,
         "textContent": text,
     }
@@ -433,14 +433,46 @@ async def api_confirm_booking(booking_id: str):
         ):
             return JSONResponse({"ok": False, "message": "Time slot already confirmed for another booking."}, status_code=409)
     update_booking_status(booking_id, "confirmed")
-    return {"ok": True, "message": "Booking confirmed"}
+
+    # Send confirmation email to client (if email present)
+    try:
+        if target.get("email"):
+            pay_link = (os.getenv("PAYMENT_LINK_BASE") or "").strip()
+            if pay_link:
+                # include booking id and 10% off marker
+                pay_link = f"{pay_link}?booking={booking_id}&discount=10"
+            subject = "Your booking is confirmed"
+            txt = f"Hi {target.get('name')},\n\nYour booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} is confirmed.\n"
+            if pay_link:
+                txt += f"Optional: pay now with 10% off: {pay_link}\n"
+            html = f"<p>Hi {target.get('name')},</p><p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> is confirmed.</p>"
+            if pay_link:
+                html += f"<p><a href='{pay_link}'>Pay now with 10% off</a></p>"
+            send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
+    except Exception as e:
+        print("Email confirm send failed:", e)
+
+    return {"ok": True, "message": "Booking confirmed and email sent"}
 
 @app.post("/api/cancel/{booking_id}")
 async def api_cancel_booking(booking_id: str):
     ok = update_booking_status(booking_id, "cancelled")
     if not ok:
         return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
-    return {"ok": True, "message": "Booking cancelled"}
+    
+    # Notify client about cancellation if we can find their email
+    try:
+        leads = read_all_leads()
+        target = next((r for r in leads if r["booking_id"] == booking_id), None)
+        if target and target.get("email"):
+            subject = "Your booking was cancelled"
+            txt = f"Hi {target.get('name')},\n\nYour booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} was cancelled.\nIf this is unexpected, reply to this email."
+            html = f"<p>Hi {target.get('name')},</p><p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> was cancelled.</p><p>If this is unexpected, reply to this email.</p>"
+            send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
+    except Exception as e:
+        print("Email cancel send failed:", e)
+
+    return {"ok": True, "message": "Booking cancelled and email sent"}
 
 # ----- Debug helpers -----
 @app.post("/api/debug/create_dummy")
