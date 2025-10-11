@@ -25,7 +25,13 @@
 </head>
 <body>
   <h1>📋 Bookings (Admin) <a href="/admin/logout" class="btn cancel">Logout</a></h1>
-  <input id="search" class="input" placeholder="Search by name, email, phone, service or date..." style="max-width:420px;margin:8px 0 12px"/>
+  <div id="filterButtons" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+  <button class="btn" data-filter="all">All</button>
+  <button class="btn" data-filter="pending">Pending</button>
+  <button class="btn" data-filter="confirmed">Confirmed</button>
+  <a class="btn" href="/api/export">Export CSV</a>
+</div>
+<input id="search" class="input" placeholder="Search by name, email, phone, service or date..." style="max-width:420px;margin:8px 0 12px"/>
   <table id="leadsTable">
     <thead>
       <tr>
@@ -94,7 +100,56 @@
       tr.style.display = text.includes(q) ? '' : 'none';
     });
  });
-    loadLeads();
+    let __FILTER = 'pending';
+document.getElementById('filterButtons').addEventListener('click', (e)=>{
+  const b = e.target.closest('button'); if(!b) return; __FILTER = b.dataset.filter; loadLeads();
+});
+async function loadLeads(){
+  const res = await fetch('/api/leads');
+  if(!res.ok){ document.body.innerHTML = "<h2>Session expired. <a href='/admin/login.html'>Login again</a></h2>"; return; }
+  const data = await res.json();
+  // sort: pending first, then by date/time
+  const order = {'pending':0,'confirmed':1,'cancelled':2};
+  data.leads.sort((a,b)=>{
+    const sa = order[a.status] ?? 9, sb = order[b.status] ?? 9;
+    if(sa!==sb) return sa-sb;
+    const da = (a.appointment_date||'') + ' ' + (a.appointment_time||'');
+    const db = (b.appointment_date||'') + ' ' + (b.appointment_time||'');
+    return da.localeCompare(db);
+  });
+  const tbody = document.querySelector('#leadsTable tbody');
+  tbody.innerHTML = '';
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  data.leads.filter(l=> __FILTER==='all' ? true : l.status===__FILTER)
+           .filter(l=> (l.name+l.email+l.phone+l.service+l.appointment_date+l.appointment_time).toLowerCase().includes(q))
+           .forEach(l=>{
+    const tr = document.createElement('tr');
+    const statusCell = `<span class="pill ${l.status}">${l.status}</span>`;
+    let actions = '';
+    if(l.status === 'pending'){
+      actions = `
+        <button class='btn confirm' onclick="confirmBooking('${l.booking_id}')">Confirm</button>
+        <button class='btn cancel' onclick="cancelBooking('${l.booking_id}')">Cancel</button>
+      `;
+    } else if(l.status === 'confirmed'){
+      actions = `<button class='btn cancel' onclick="cancelBooking('${l.booking_id}')">Cancel</button>`;
+    }
+    tr.innerHTML = `
+      <td>${statusCell}</td>
+      <td>${l.name}</td>
+      <td>${l.email||''}</td>
+      <td>${l.phone||''}</td>
+      <td>${l.service}</td>
+      <td>${l.appointment_date}</td>
+      <td>${l.appointment_time}</td>
+      <td>${actions}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+document.getElementById('search').addEventListener('input', ()=>{ loadLeads(); });
+// default to pending
+loadLeads();
   </script>
 </body>
 </html>
