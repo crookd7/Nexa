@@ -40,9 +40,6 @@ serializer = URLSafeSerializer(SESSION_SECRET, salt="admin-session")
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
 # Business copy for FAQs
-BUSINESS_NAME = (os.getenv("BUSINESS_NAME") or "Nexa").strip()
-LOGO_URL = (os.getenv("LOGO_URL") or "").strip()
-PROMO_CODE = (os.getenv("PROMO_CODE") or "NEXA10").strip()
 BUSINESS_DESC = (os.getenv("BUSINESS_DESC") or
                  "We provide consultations and scheduling for clients in Sofia.").strip()
 
@@ -196,22 +193,11 @@ def _verify(action: str, booking_id: str, token: str) -> bool:
 # -------------------------
 # Email via Brevo HTTP API
 # -------------------------
-def _wrap_email_html(title: str, inner_html: str) -> str:
-    head_logo = f"<img src='{LOGO_URL}' alt='{BUSINESS_NAME}' style='height:36px;margin:16px 0'/>" if LOGO_URL else ""
-    return (
-        "<div style='font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a'>"
-        f"{head_logo}"
-        f"<h2 style='margin:8px 0 16px'>{title}</h2>"
-        f"<div style='background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:16px'>{inner_html}</div>"
-        f"<p style='color:#64748b;margin-top:16px'>{BUSINESS_NAME}</p>"
-        "</div>"
-    )
-
 def send_via_brevo_api(subject: str, text: str, html: Optional[str] = None, to_email: Optional[str] = None) -> None:
     if not BREVO_API_KEY or not (SMTP_FROM and NOTIFY_TO):
         return
     payload = {
-        "sender": {"email": SMTP_FROM, "name": BUSINESS_NAME},
+        "sender": {"email": SMTP_FROM, "name": (os.getenv("BUSINESS_NAME") or "Nexa")},
         "to": [{"email": (to_email or NOTIFY_TO)}],
         "subject": subject,
         "textContent": text,
@@ -337,18 +323,13 @@ async def root():
 @app.get("/public/{path:path}")
 async def public_files(path: str):
     file_path = os.path.join("public", path)
-    if path == 'admin.html':
-        session = request.cookies.get('admin_session') if isinstance(request, Request) else None
-        # deny direct admin.html access via this route if no session
-        try:
-            if not session or not verify_session(session):
-                return RedirectResponse(url='/admin/login.html', status_code=302)
-        except Exception:
-            return RedirectResponse(url='/admin/login.html', status_code=302)
-    
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path)
+    resp = FileResponse(file_path)
+    if file_path.endswith('.html'):
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 @app.get("/admin/login.html", response_class=HTMLResponse)
 async def admin_login_page():
@@ -439,14 +420,6 @@ async def cancel_booking(booking_id: str, token: str):
 async def list_leads():
     return {"leads": read_all_leads()}
 
-@app.post("/api/confirm/{booking_id}")
-async def api_confirm_booking(booking_id: str):
-    leads = read_all_leads()
-    target = next((r for r in leads if r["booking_id"] == booking_id), None)
-    if not target:
-        return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
-    if target["status"] == "confirmed":
-        return {"ok": True, "message": "Already confirmed"}
     for r in leads:
         if (
             r["booking_id"] != booking_id
@@ -456,73 +429,8 @@ async def api_confirm_booking(booking_id: str):
         ):
             return JSONResponse({"ok": False, "message": "Time slot already confirmed for another booking."}, status_code=409)
     update_booking_status(booking_id, "confirmed")
+    return {"ok": True, "message": "Booking confirmed"}
 
-    # Send confirmation email to client (if email present)
-    try:
-        if target.get("email"):
-            pay_link = (os.getenv("PAYMENT_LINK_BASE") or "").strip()
-            if pay_link:
-                # include booking id and 10% off marker
-                pay_link = f"{pay_link}?booking={booking_id}&discount=10"
-            subject = f"Your booking is confirmed"
-txt = (
-    f"Hi {target.get('name')},
-
-"
-    f"Your booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} is confirmed.
-"
-)
-promo = PROMO_CODE
-pay_link = (os.getenv("PAYMENT_LINK_BASE") or "").strip()
-if pay_link:
-    pay_link = f"{pay_link}?booking={booking_id}&discount=10&code={promo}"
-    txt += f"Optional: pay now with 10% off using code {promo}: {pay_link}
-"
-inner = (
-    f"<p>Hi {target.get('name')},</p>"
-    f"<p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> is confirmed.</p>"
-    + (f"<p><a href='{pay_link}'>Pay now with 10% off (code {promo})</a></p>" if pay_link else "")
-)
-html = _wrap_email_html("Booking Confirmed", inner)
-send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
-subject, txt, html, to_email=target.get("email"))
-    except Exception as e:
-        print("Email confirm send failed:", e)
-
-    return {"ok": True, "message": "Booking confirmed and email sent"}
-
-@app.post("/api/cancel/{booking_id}")
-async def api_cancel_booking(booking_id: str):
-    ok = update_booking_status(booking_id, "cancelled")
-    if not ok:
-        return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
-    
-    # Notify client about cancellation if we can find their email
-    try:
-        leads = read_all_leads()
-        target = next((r for r in leads if r["booking_id"] == booking_id), None)
-        if target and target.get("email"):
-            subject = f"Your booking was cancelled"
-txt = (
-    f"Hi {target.get('name')},
-
-"
-    f"Your booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} was cancelled.
-"
-    "If this is unexpected, reply to this email."
-)
-inner = (
-    f"<p>Hi {target.get('name')},</p>"
-    f"<p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> was cancelled.</p>"
-    f"<p>If this is unexpected, reply to this email.</p>"
-)
-html = _wrap_email_html("Booking Cancelled", inner)
-send_via_brevo_api(subject, txt, html, to_email=target.get("email"))
-subject, txt, html, to_email=target.get("email"))
-    except Exception as e:
-        print("Email cancel send failed:", e)
-
-    return {"ok": True, "message": "Booking cancelled and email sent"}
 
 # ----- Debug helpers -----
 @app.post("/api/debug/create_dummy")
@@ -694,30 +602,130 @@ async def chat(payload: Dict[str, str]):
     )
     return {"reply": _nice_reply(help_text)}
 
-@app.get('/api/export')
-async def export_csv():
-    _ensure_csv()
-    return FileResponse(LEADS_FILE, filename='leads.csv', media_type='text/csv')
+
+@app.post("/api/confirm/{booking_id}")
+async def api_confirm_booking(booking_id: str):
+    leads = read_all_leads()
+    target = next((r for r in leads if r["booking_id"] == booking_id), None)
+    if not target:
+        return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
+    if target["status"] == "confirmed":
+        return {"ok": True, "message": "Already confirmed"}
+
+    for r in leads:
+        if (
+            r["booking_id"] != booking_id
+            and r["appointment_date"] == target["appointment_date"]
+            and r["appointment_time"] == target["appointment_time"]
+            and r["status"] == "confirmed"
+        ):
+            return JSONResponse({"ok": False, "message": "Time slot already confirmed for another booking."}, status_code=409)
+
+    update_booking_status(booking_id, "confirmed")
+
+    try:
+        to_email = (target.get("email") or "").strip()
+        if to_email:
+            promo = os.getenv("PROMO_CODE") or "NEXA10"
+            pay_link = (os.getenv("PAYMENT_LINK_BASE") or "").strip()
+            if pay_link:
+                pay_link = f"{pay_link}?booking={booking_id}&discount=10&code={promo}"
+
+            subject = "Your booking is confirmed"
+            txt = (
+                f"Hi {target.get('name')},\n\n"
+                f"Your booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} is confirmed.\n"
+            )
+            if pay_link:
+                txt += f"Optional: pay now with 10% off using code {promo}: {pay_link}\n"
+
+            inner = (
+                f"<p>Hi {target.get('name')},</p>"
+                f"<p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> is confirmed.</p>"
+                + (f"<p><a href='{pay_link}'>Pay now with 10% off (code {promo})</a></p>" if pay_link else "")
+            )
+            try:
+                html = _wrap_email_html("Booking Confirmed", inner)  # type: ignore
+            except Exception:
+                html = inner
+
+            send_via_brevo_api(subject, txt, html, to_email=to_email)
+    except Exception as e:
+        print("Email confirm send failed:", e)
+
+    return {"ok": True, "message": "Booking confirmed"}
+
+
+
+@app.post("/api/cancel/{booking_id}")
+async def api_cancel_booking(booking_id: str):
+    ok = update_booking_status(booking_id, "cancelled")
+    if not ok:
+        return JSONResponse({"ok": False, "message": "Booking not found"}, status_code=404)
+
+    try:
+        leads = read_all_leads()
+        target = next((r for r in leads if r["booking_id"] == booking_id), None)
+        to_email = (target.get("email") or "").strip() if target else ""
+        if to_email:
+            subject = "Your booking was cancelled"
+            txt = (
+                f"Hi {target.get('name')},\n\n"
+                f"Your booking for {target.get('service')} on {target.get('appointment_date')} at {target.get('appointment_time')} was cancelled.\n"
+                "If this is unexpected, reply to this email."
+            )
+            inner = (
+                f"<p>Hi {target.get('name')},</p>"
+                f"<p>Your booking for <b>{target.get('service')}</b> on <b>{target.get('appointment_date')}</b> at <b>{target.get('appointment_time')}</b> was cancelled.</p>"
+                "<p>If this is unexpected, reply to this email.</p>"
+            )
+            try:
+                html = _wrap_email_html("Booking Cancelled", inner)  # type: ignore
+            except Exception:
+                html = inner
+
+            send_via_brevo_api(subject, txt, html, to_email=to_email)
+    except Exception as e:
+        print("Email cancel send failed:", e)
+
+    return {"ok": True, "message": "Booking cancelled"}
+
 
 @app.post("/admin/login")
 async def admin_login(request: Request):
-    form = await request.form()
-    username = (form.get("username") or "").strip()
-    password = (form.get("password") or "").strip()
+    username = password = ""
+    try:
+        data = await request.json()
+        username = (data.get("username") or "").strip()
+        password = (data.get("password") or "").strip()
+    except Exception:
+        pass
+    if not username:
+        form = await request.form()
+        username = (form.get("username") or "").strip()
+        password = (form.get("password") or "").strip()
+
     if username == ADMIN_USER and password == ADMIN_PASS:
         token = create_session(username)
-        resp = RedirectResponse(url="/public/admin.html", status_code=302)
-        # cookie for 7 days
-        resp.set_cookie("admin_session", token, max_age=60*60*24*7, httponly=True, samesite="Lax")
+        accept = request.headers.get("accept", "")
+        if "application/json" in accept or request.headers.get("x-requested-with"):
+            resp = JSONResponse({"ok": True})
+        else:
+            resp = RedirectResponse(url="/public/admin.html", status_code=302)
+        resp.set_cookie("admin_session", token, max_age=60*60*24*7, httponly=True, samesite="None", secure=True, path="/")
         return resp
+
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept or request.headers.get("x-requested-with"):
+        return JSONResponse({"ok": False, "error": "invalid"}, status_code=401)
     return RedirectResponse(url="/admin/login.html?error=Invalid+credentials", status_code=302)
+
+@app.post("/api/admin/login")
+async def admin_login_alias(request: Request):
+    return await admin_login(request)
 
 @app.get("/admin/logout")
 async def admin_logout():
     resp = RedirectResponse(url="/admin/login.html", status_code=302)
-    resp.delete_cookie("admin_session")
+    resp.delete_cookie("admin_session", path="/")
     return resp
-
-@app.post('/api/admin/login')
-async def admin_login_alias(request: Request):
-    return await admin_login(request)
