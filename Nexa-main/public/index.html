@@ -1,0 +1,550 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Nexa – Book an Appointment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --brand:#004aad; --bg:#f7f8fa; --text:#0f172a; --muted:#64748b; --border:#e5e7eb; }
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0}
+    .container{max-width:900px;margin:24px auto;padding:0 16px 120px}
+    h1{margin:8px 0 20px;text-align:center}
+    .card{background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
+    .label{font-size:12px;color:var(--muted);margin-bottom:6px;display:inline-block}
+    .input, select, .btn{width:100%;padding:12px;border-radius:10px;border:1px solid #cbd5e1;font-size:16px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .btn{background:var(--brand);color:#fff;border:none;cursor:pointer;font-weight:600}
+    .btn:hover{filter:brightness(.95)}
+    .note{color:var(--muted);font-size:13px;margin-top:6px}
+    .mt-2{margin-top:10px} .mt-3{margin-top:16px}
+    .pill{display:inline-block;border-radius:999px;padding:2px 8px;font-size:12px;margin:2px}
+    .pill-confirmed{background:#fee2e2;color:#991b1b}
+    .pill-pending{background:#f1f5f9;color:#475569}
+
+    /* Floating Admin button */
+    #adminBtn{
+      position:fixed; top:12px; right:12px; z-index:9999;
+      background:#334155; color:#fff; border:none; border-radius:8px; padding:8px 10px; font-size:13px; cursor:pointer; opacity:.9;
+    }
+    #adminBtn:hover{opacity:1}
+
+    /* Slide-over Admin Panel */
+    #adminPanel{
+      position:fixed; top:0; right:0; width:420px; max-width:95vw; height:100vh; z-index:9998;
+      background:#fff; border-left:1px solid var(--border); box-shadow:-20px 0 40px rgba(0,0,0,.15);
+      transform:translateX(100%); transition:transform .25s ease; display:flex; flex-direction:column;
+    }
+    #adminPanel.open{ transform:translateX(0); }
+    #adminHeader{ padding:12px 14px; background:#0f172a; color:#fff; display:flex; align-items:center; justify-content:space-between; }
+    #adminBody{ padding:12px; overflow:auto; flex:1; }
+    .adm-input{ width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:8px; margin:6px 0; }
+    .adm-actions .btn{ padding:8px 10px; border-radius:6px; font-size:14px; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th, td { border:1px solid #e2e8f0; padding:8px; text-align:left; font-size:14px; }
+    th { background:#f1f5f9; position:sticky; top:0; }
+    .btn.small{ padding:6px 8px; font-size:12px; border-radius:6px; }
+    .btn.confirm{ background:#16a34a; }
+    .btn.cancel{ background:#ef4444; }
+
+    /* Chat widget */
+    .chat-launcher{
+      position:fixed; right:16px; bottom:16px; z-index:9997;
+      border:none; border-radius:999px; padding:12px 16px; font-weight:700;
+      background:#004aad; color:#fff; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.15);
+    }
+    .chatbox{
+      position:fixed; right:16px; bottom:76px; width:320px; max-width:90vw; height:460px;
+      background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 16px 36px rgba(0,0,0,.18);
+      display:none; flex-direction:column; overflow:hidden; z-index:9996;
+    }
+    .chatbox.open{ display:flex; }
+    .chat-header{ background:#0f172a; color:#fff; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; }
+    .chat-messages{ flex:1; overflow:auto; padding:10px; background:#f8fafc }
+    .msg{ margin:6px 0; max-width:80%; padding:8px 10px; border-radius:12px; line-height:1.3; }
+    .msg.user{ margin-left:auto; background:#dbeafe; }
+    .msg.bot{ background:#ffffff; border:1px solid #e5e7eb; }
+    .chat-input{ display:flex; gap:6px; padding:10px; border-top:1px solid #e5e7eb; background:#fff }
+    .chat-input input{ flex:1; padding:10px; border:1px solid #cbd5e1; border-radius:10px; }
+    .chat-input button{ padding:10px 12px; border:none; border-radius:10px; background:#004aad; color:#fff; font-weight:700; cursor:pointer; }
+
+    /* Elegant tiny close */
+    .chat-close {
+      background: rgba(255,255,255,0.2);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: #fff;
+      border-radius: 50%;
+      width: 26px; height: 26px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; line-height: 1; cursor: pointer; transition: all .2s ease;
+    }
+    .chat-close:hover { background: rgba(255,255,255,0.35); transform: scale(1.08); }
+
+    /* Chips row collapsed */
+    .chips-collapsed { display:none !important; }
+  </style>
+</head>
+<body>
+  <!-- Admin button -->
+  <button id="adminBtn">🔑 Admin</button>
+
+  <div class="container">
+    <h1>Nexa – Book an Appointment</h1>
+    <div class="card">
+      <h2 style="margin:0 0 12px">Quick Lead Form</h2>
+
+      <label class="label" for="name">Name</label>
+      <input id="name" class="input" placeholder="Name" />
+
+      <div class="mt-2"></div>
+      <label class="label" for="phone">Phone</label>
+      <input id="phone" class="input" placeholder="Phone" />
+
+      <div class="mt-2"></div>
+      <label class="label" for="service">Service</label>
+      <input id="service" class="input" placeholder="Service" />
+
+      <div class="mt-2"></div>
+      <div class="row">
+        <div>
+          <label class="label" for="date">Date</label>
+          <input id="date" type="date" class="input" />
+        </div>
+        <div>
+          <label class="label" for="time">Time</label>
+          <select id="time"></select>
+          <div id="takenList" class="note" style="min-height:18px;margin-top:6px;"></div>
+        </div>
+      </div>
+
+      <div class="note mt-2">
+        Confirmed bookings block the calendar. Pending requests are shown in gray but may still be available.
+      </div>
+
+      <div class="mt-3"></div>
+      <button class="btn" id="submitLead" type="button">Submit</button>
+      <p id="status" class="note mt-2"></p>
+    </div>
+  </div>
+
+  <!-- Slide-over Admin Panel -->
+  <div id="adminPanel" aria-hidden="true">
+    <div id="adminHeader">
+      <strong>Admin</strong>
+      <div>
+        <button id="logoutBtn" class="btn small cancel" style="display:none">Logout</button>
+        <button id="closeAdmin" class="chat-close" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div id="adminBody">
+      <!-- Login -->
+      <div id="loginView">
+        <h3 style="margin:6px 0 6px">Login</h3>
+        <input id="admUser" class="adm-input" placeholder="Username" autocomplete="username" />
+        <input id="admPass" class="adm-input" type="password" placeholder="Password" autocomplete="current-password" />
+        <div class="adm-actions"><button id="admLoginBtn" class="btn">Login</button></div>
+        <p id="admMsg" class="note"></p>
+      </div>
+
+      <!-- Dashboard -->
+      <div id="dashView" style="display:none">
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+          <label class="label" for="filterDate" style="margin:0">Filter by date</label>
+          <input id="filterDate" type="date" class="adm-input" style="max-width:180px; margin:0" />
+          <button id="refreshBtn" class="btn small" style="background:#0ea5e9">Refresh</button>
+          <button id="clearFilter" class="btn small" style="background:#94a3b8">Clear</button>
+          <button id="makeDummy" class="btn small" style="background:#22c55e">Add test</button>
+        </div>
+        <div id="countInfo" class="note"></div>
+        <table id="leadsTable">
+          <thead>
+            <tr>
+              <th>Status</th><th>Name</th><th>Phone</th><th>Service</th>
+              <th>Date</th><th>Time</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="dashMsg" class="note"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Chat widget -->
+  <button class="chat-launcher" id="chatLauncher">💬 Chat</button>
+  <div class="chatbox" id="chatbox" aria-hidden="true">
+    <div class="chat-header">
+      <strong>Assistant</strong>
+      <button id="chatClose" class="chat-close" aria-label="Close">✕</button>
+    </div>
+
+    <div class="chat-messages" id="chatMessages"></div>
+
+    <!-- quick replies + toggle -->
+    <div style="display:flex;align-items:center;justify-content:space-between;border-top:1px solid #e5e7eb;padding:6px 10px;background:#fff">
+      <small id="chipToggle" style="cursor:pointer;color:#334155">Hide options</small>
+      <span style="font-size:12px;color:#94a3b8">tips</span>
+    </div>
+    <div id="chatChips" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid #e5e7eb;background:#fff">
+      <button class="btn small" onclick="sendChip('availability ' + new Date().toISOString().slice(0,10))">Today’s availability</button>
+      <button class="btn small" onclick="sendChip('availability tomorrow')">Tomorrow’s availability</button>
+      <button class="btn small" onclick="sendChip('What services do you offer?')">Services</button>
+      <button class="btn small" onclick="openHumanForm()">Talk to an agent</button>
+    </div>
+
+    <!-- human contact form -->
+    <div id="humanForm" style="display:none;padding:10px;border-top:1px solid #e5e7eb;background:#fff">
+      <div style="font-weight:600;margin-bottom:6px">Request a callback</div>
+      <input id="hfName" class="input" placeholder="Your name" style="margin-bottom:6px;padding:8px;font-size:14px">
+      <input id="hfPhone" class="input" placeholder="Phone (incl. country code)" style="margin-bottom:6px;padding:8px;font-size:14px">
+      <input id="hfMsg" class="input" placeholder="Short message (optional)" style="margin-bottom:6px;padding:8px;font-size:14px">
+      <button class="btn" onclick="submitHumanForm()" style="width:100%">Request callback</button>
+      <div id="hfStatus" class="note" style="margin-top:6px"></div>
+    </div>
+
+    <div class="chat-input">
+      <input id="chatInput" placeholder="Ask about availability or say 'book me…'"/>
+      <button id="chatSend">Send</button>
+    </div>
+  </div>
+
+  <script>
+    // ====== CONFIG ======
+    const NEXA_KEY = "89ee71c2b83c9f90e0ba7a9bfa98eead"; // must match env NEXA_SERVER_KEY if you set it
+    const TIME_STEP_MIN = 15;
+
+    // ====== Booking helpers ======
+    function toMinutes(t){ const [h,m]=t.split(':').map(Number); return h*60+m; }
+    function pad2(n){ return (n<10?'0':'')+n; }
+    function minutesToHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${pad2(h)}:${pad2(m)}`; }
+
+    function buildTimeOptions(open, close, confirmed=[], pending=[]){
+      const sel = document.getElementById('time');
+      sel.innerHTML = "";
+      const openM = toMinutes(open), closeM = toMinutes(close);
+      for (let m=openM; m<=closeM; m+=TIME_STEP_MIN){
+        const t = minutesToHHMM(m);
+        const opt = document.createElement('option');
+        opt.value = t;
+        if (confirmed.includes(t)) { opt.disabled = true; opt.textContent = `${t} (confirmed)`; }
+        else if (pending.includes(t)) { opt.textContent = `${t} (pending)`; opt.style.color = "#64748b"; }
+        else { opt.textContent = t; }
+        sel.appendChild(opt);
+      }
+      const firstFree = Array.from(sel.options).find(o => !o.disabled);
+      if (firstFree) sel.value = firstFree.value;
+    }
+
+    function showTakenPills(confirmed, pending){
+      const box = document.getElementById('takenList');
+      const pills = [];
+      if (confirmed.length) pills.push("Confirmed: " + confirmed.map(t=>`<span class="pill pill-confirmed">${t}</span>`).join(" "));
+      if (pending.length) pills.push("Pending: " + pending.map(t=>`<span class="pill pill-pending">${t}</span>`).join(" "));
+      box.innerHTML = pills.join("<br/>");
+    }
+
+    async function fetchAvailability(dateStr){
+      const res = await fetch(`/api/availability?date=${encodeURIComponent(dateStr)}`);
+      const data = await res.json();
+      const open = data?.hours?.open || "09:00";
+      const close = data?.hours?.close || "18:00";
+      const confirmed = Array.isArray(data?.taken) ? data.taken : [];
+      const pending   = Array.isArray(data?.pending) ? data.pending : [];
+      buildTimeOptions(open, close, confirmed, pending);
+      showTakenPills(confirmed, pending);
+    }
+
+    async function saveLead(){
+      const status = document.getElementById('status');
+      status.textContent = "";
+      const body = {
+        name: document.getElementById('name').value.trim(),
+        phone: document.getElementById('phone').value.trim(),
+        service: document.getElementById('service').value.trim(),
+        appointment_date: document.getElementById('date').value,
+        appointment_time: document.getElementById('time').value
+      };
+      try{
+        const res = await fetch('/api/lead', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Nexa-Key': NEXA_KEY },
+          body: JSON.stringify(body)
+        });
+        const raw = await res.text(); let data; try{ data = JSON.parse(raw) } catch{ data = { detail: raw } }
+        if (!res.ok) {
+          if (res.status === 401) {
+            status.textContent = "Booking blocked (401). Tip: leave NEXA_SERVER_KEY empty in Render OR ensure it matches NEXA_KEY in this page.";
+            return;
+          }
+          if (res.status === 409) {
+            await fetchAvailability(body.appointment_date);
+            status.textContent = data.message || "That time is already confirmed. Please choose another.";
+            return;
+          }
+          throw new Error(data?.detail || data?.error || 'Submit failed');
+        }
+        status.textContent = data.message || "Saved. We’ll contact you to confirm.";
+        fetchAvailability(body.appointment_date);
+      }catch(err){
+        status.textContent = "Error: " + (err.message || String(err));
+      }
+    }
+
+    function setDefaultDateToday(){
+      const d = document.getElementById('date');
+      if (!d.value) d.value = new Date().toISOString().split("T")[0];
+    }
+
+    document.getElementById('submitLead')?.addEventListener('click', saveLead);
+    document.getElementById('date')?.addEventListener('change', (e)=> fetchAvailability(e.target.value));
+    setDefaultDateToday(); fetchAvailability(document.getElementById('date').value);
+
+    // ====== Admin slide-over (hide button while open)
+    const panel = document.getElementById('adminPanel');
+    const openBtn = document.getElementById('adminBtn');
+    const closeBtn = document.getElementById('closeAdmin');
+    const loginView = document.getElementById('loginView');
+    const dashView = document.getElementById('dashView');
+    const admMsg = document.getElementById('admMsg');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    openBtn.addEventListener('click', () => {
+      const willOpen = !panel.classList.contains('open');
+      panel.classList.toggle('open');
+      openBtn.style.display = willOpen ? 'none' : 'block';
+      if (willOpen) checkSessionAndRender();
+    });
+
+    closeBtn.addEventListener('click', () => {
+      panel.classList.remove('open');
+      openBtn.style.display = 'block';
+    });
+
+    document.getElementById('admLoginBtn').addEventListener('click', async ()=>{
+      const u = document.getElementById('admUser').value.trim();
+      const p = document.getElementById('admPass').value;
+      admMsg.textContent = "";
+      const form = new FormData();
+      form.append("username", u);
+      form.append("password", p);
+      const res = await fetch('/admin/login', { method:'POST', body: form, credentials: 'include' });
+      const data = await res.json().catch(()=>({}));
+      if (res.ok && data.ok) {
+        loginView.style.display = 'none';
+        dashView.style.display = 'block';
+        logoutBtn.style.display = 'inline-block';
+        loadLeads();
+      } else {
+        admMsg.textContent = (data && data.message) || "Invalid login.";
+      }
+    });
+
+    logoutBtn.addEventListener('click', async ()=>{
+      await fetch('/admin/logout', { credentials:'include' });
+      loginView.style.display = 'block';
+      dashView.style.display = 'none';
+      logoutBtn.style.display = 'none';
+      admMsg.textContent = "Logged out.";
+    });
+
+    async function checkSessionAndRender(){
+      const res = await fetch('/api/leads', { credentials:'include' });
+      if (res.ok) {
+        loginView.style.display = 'none';
+        dashView.style.display = 'block';
+        logoutBtn.style.display = 'inline-block';
+        loadLeads();
+      } else {
+        loginView.style.display = 'block';
+        dashView.style.display = 'none';
+        logoutBtn.style.display = 'none';
+        document.getElementById('dashMsg').textContent = "Not logged in. Please use the form above.";
+      }
+    }
+
+    document.getElementById('clearFilter').addEventListener('click', () => {
+      document.getElementById('filterDate').value = '';
+      loadLeads();
+    });
+
+    document.getElementById('makeDummy').addEventListener('click', async () => {
+      const res = await fetch('/api/debug/create_dummy', { method:'POST', credentials:'include' });
+      const data = await res.json().catch(()=>({}));
+      if (res.ok && data.ok) {
+        alert(`Added test lead: ${data.date} ${data.time}`);
+        loadLeads();
+      } else {
+        alert('Could not add test lead (are you logged in?)');
+      }
+    });
+
+    async function loadLeads(){
+      const res = await fetch('/api/leads', { credentials:'include' });
+      if (!res.ok){ document.getElementById('dashMsg').textContent = "Not logged in. Please use the form above."; return; }
+      const data = await res.json();
+      const tbody = document.querySelector("#leadsTable tbody");
+      tbody.innerHTML = "";
+      const filter = document.getElementById('filterDate').value; // empty -> show all
+      const leads = data.leads.filter(l => !filter || l.appointment_date === filter);
+
+      const cPending = leads.filter(l=>l.status==='pending').length;
+      const cConfirmed = leads.filter(l=>l.status==='confirmed').length;
+      const cCancelled = leads.filter(l=>l.status==='cancelled').length;
+      document.getElementById('countInfo').textContent = `Showing ${leads.length} (pending ${cPending} | confirmed ${cConfirmed} | cancelled ${cCancelled})`;
+
+      leads.forEach(l => {
+        const tr = document.createElement("tr");
+        const statusCell = `<span class="pill ${l.status}">${l.status}</span>`;
+        let actions = "";
+        if(l.status === "pending"){
+          actions = `
+            <button class="btn small confirm" onclick="confirmBooking('${l.booking_id}')">Confirm</button>
+            <button class="btn small cancel" onclick="cancelBooking('${l.booking_id}')">Cancel</button>
+          `;
+        } else if(l.status === "confirmed"){
+          actions = `<button class="btn small cancel" onclick="cancelBooking('${l.booking_id}')">Cancel</button>`;
+        }
+        tr.innerHTML = `
+          <td>${statusCell}</td>
+          <td>${l.name}</td>
+          <td>${l.phone}</td>
+          <td>${l.service}</td>
+          <td>${l.appointment_date}</td>
+          <td>${l.appointment_time}</td>
+          <td>${actions}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadLeads);
+    document.getElementById('filterDate').addEventListener('change', loadLeads);
+
+    window.confirmBooking = async function(id){
+      if(!confirm("Confirm this booking?")) return;
+      const res = await fetch(`/api/confirm/${id}`, { method:"POST", credentials:'include' });
+      const data = await res.json();
+      alert(data.message || "Updated");
+      loadLeads();
+      const d = document.getElementById('date').value;
+      if (d) fetchAvailability(d);
+    }
+    window.cancelBooking = async function(id){
+      if(!confirm("Cancel this booking?")) return;
+      const res = await fetch(`/api/cancel/${id}`, { method:"POST", credentials:'include' });
+      const data = await res.json();
+      alert(data.message || "Updated");
+      loadLeads();
+      const d = document.getElementById('date').value;
+      if (d) fetchAvailability(d);
+    }
+
+    // ====== Chat widget ======
+    const chatBtn = document.getElementById('chatLauncher');
+    const chatBox = document.getElementById('chatbox');
+    const chatClose = document.getElementById('chatClose');
+    const chatInput = document.getElementById('chatInput');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatSend = document.getElementById('chatSend');
+    const chipToggle = document.getElementById('chipToggle');
+    const chatChips = document.getElementById('chatChips');
+
+    function addMsg(text, who='bot'){
+      const div = document.createElement('div');
+      div.className = 'msg ' + who;
+      div.textContent = text;
+      chatMessages.appendChild(div);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function openChat(){
+      chatBox.classList.add('open');
+      if (!chatMessages.dataset.greeted){
+        addMsg("Hey there! 👋 I can check availability, pencil you in, or answer quick questions. Use the buttons below or ask me anything.");
+        chatMessages.dataset.greeted = '1';
+      }
+      chatInput.focus();
+    }
+    function closeChat(){ chatBox.classList.remove('open'); }
+
+    chatBtn.addEventListener('click', openChat);
+    chatClose.addEventListener('click', closeChat);
+
+    chipToggle.addEventListener('click', () => {
+      chatChips.classList.toggle('chips-collapsed');
+      chipToggle.textContent = chatChips.classList.contains('chips-collapsed') ? 'Show options' : 'Hide options';
+    });
+
+    function sendChip(text){
+      chatInput.value = text;
+      sendChat();
+    }
+
+    // Quick local FAQ
+    function localFAQ(q){
+      const s = q.toLowerCase().trim();
+      if (/^(hi|hello|hey)\b/.test(s)) return "Hi there! 👋 I can check availability, help you book, or answer quick questions.";
+      if (/(what kind of business|who are you|what is this|what do you do|business is this)/.test(s)) return "We provide consultations and scheduling for clients in Sofia.";
+      if (/(hour|open|close|working)/.test(s)) return "We’re open from 09:00 to 18:00, Monday–Friday.";
+      if (/(where|address|location|office|map|directions)/.test(s)) return "We’re in Sofia. Need directions? An agent can text you the details.";
+      if (/(service|offer|do you do)/.test(s)) return "We offer consultations and scheduling. Tell me what you need and I’ll help book a slot.";
+      if (/(price|cost|fee|how much)/.test(s)) return "Pricing varies by service. I can connect you with an agent for a quote.";
+      if (/(human|agent|person|contact|call me)/.test(s)) { openHumanForm(); return "Sure—leave your name and phone and an agent will call you shortly."; }
+      if (/(avail|free slot|free slots|slot|slots)/.test(s) && !/\b20\d{2}-\d{2}-\d{2}\b/.test(s) && !/(today|tomorrow|tmrw)/.test(s)) {
+        return "Our hours are 09:00–18:00, Mon–Fri. Ask me ‘availability today’, ‘availability tomorrow’, or a specific date like ‘availability 2025-10-05’.";
+      }
+      return null;
+    }
+
+    function openHumanForm(){ document.getElementById('humanForm').style.display='block'; }
+
+    async function submitHumanForm(){
+      const name = document.getElementById('hfName').value.trim();
+      const phone = document.getElementById('hfPhone').value.trim();
+      const message = document.getElementById('hfMsg').value.trim();
+      const status = document.getElementById('hfStatus');
+      status.textContent = '';
+      try{
+        const res = await fetch('/api/chat-contact', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ name, phone, message })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Failed');
+        status.textContent = data.message || 'Request sent.';
+        addMsg("Got it! An agent will reach out shortly. Anything else I can help with meanwhile?", 'bot');
+      }catch(e){
+        status.textContent = 'Sorry—could not send. Please check your phone number and try again.';
+      }
+    }
+    window.openHumanForm = openHumanForm;
+    window.submitHumanForm = submitHumanForm;
+
+    async function sendChat(){
+      const msg = chatInput.value.trim();
+      if(!msg) return;
+      addMsg(msg, 'user');
+      chatInput.value = '';
+
+      const local = localFAQ(msg);
+      if (local) { addMsg(local, 'bot'); return; }
+
+      try{
+        const res = await fetch('/api/chat', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        addMsg(data.reply || 'Sorry, I did not get that.', 'bot');
+      }catch(e){
+        addMsg('Network error, please try again.', 'bot');
+      }
+    }
+
+    chatInput.addEventListener('keydown', (e)=> { if(e.key==='Enter') sendChat(); });
+    chatSend.addEventListener('click', sendChat);
+  </script>
+</body>
+</html>
