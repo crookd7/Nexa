@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Admin Login</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f8fafc;margin:0;display:flex;align-items:center;justify-content:center;height:100vh}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08);padding:20px;min-width:320px}
+    .label{font-size:12px;color:#64748b;margin-bottom:6px;display:inline-block}
+    .input{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;margin-bottom:12px;font-size:16px}
+    .btn{width:100%;padding:12px;border:none;border-radius:10px;background:#004aad;color:#fff;font-weight:700;cursor:pointer}
+    .err{color:#dc2626;margin-bottom:10px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Admin Login</h2>
+    <form method="POST" action="/admin/login">
+      <div class="err" id="err"></div>
+      <div>
+        <div class="label">Username</div>
+        <input class="input" name="username" placeholder="admin" required />
+      </div>
+      <div>
+        <div class="label">Password</div>
+        <input class="input" type="password" name="password" placeholder="••••••••" required />
+      </div>
+      <button class="btn" type="submit">Login</button>
+    </form>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const msg = params.get('error');
+    if(msg) document.getElementById('err').textContent = msg;
+  </script>
+</body>
+</html>
