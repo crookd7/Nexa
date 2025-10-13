@@ -21,12 +21,13 @@
   </style>
 </head>
 <body>
+<div id="brand" style="display:flex;gap:10px;align-items:center;margin:10px 0"></div>
   <h1>📋 Bookings (Admin) <a href="/admin/logout" class="btn cancel">Logout</a></h1>
   <table id="leadsTable">
     <thead>
       <tr>
-        <th>Status</th><th>Name</th><th>Phone</th><th>Service</th>
-        <th>Date</th><th>Time</th><th>Actions</th>
+        <th>Status</th><th>Name</th><th>Email</th><th>Phone</th><th>Service</th>
+        <th>Date</th><th>Time</th><th>Paid</th><th>Actions</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -81,6 +82,19 @@
       loadLeads();
     }
 
+    
+    async function markPaid(id, makePaid){
+      const res = await fetch(`/api/paid/${id}?paid=${makePaid?'yes':'no'}`, { method:'POST' });
+      const data = await res.json();
+      if(!data.ok) alert(data.message||'Failed');
+      loadLeads();
+    }
+    // Render brand
+    (async ()=>{
+      try{ const b = await (await fetch('/api/brand')).json();
+        const el = document.getElementById('brand'); if(el) el.innerHTML = (b.logo?`<img src="${b.logo}" style="height:28px">`:'') + (b.name?`<strong>${b.name}</strong>`:'');
+      }catch(e){}
+    })();
     loadLeads();
   </script>
 </body>
