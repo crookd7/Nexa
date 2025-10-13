@@ -538,17 +538,14 @@ async def chat(payload: Dict[str, str]):
     if "book" in low or "reserve" in low or "appointment" in low:
         return {"reply": _nice_reply("Tell me: your name, phone, service, date (YYYY-MM-DD) and time (HH:MM). Example: “Book me for consultation tomorrow at 14:30, I'm Alex, phone +359…”")}
     help_text = (
-        "I can help with:
-"
-        "• availability today / tomorrow
-"
-        "• availability 2025-10-13
-"
-        "• book me for consultation tomorrow at 14:30, I'm Alex, phone +359…
-"
-        "You can also say “talk to an agent”."
-    )
-    return {"reply": _nice_reply("I can’t help with that directly, but I can help you book, check availability, prices, or location — or connect you to a human.
+         help_text = """I can help with:
+• availability today / tomorrow
+• availability 2025-10-13
+• book me for consultation tomorrow at 14:30, I'm Alex, phone +359...
+You can also say "talk to an agent"."""
+    return {"reply": _nice_reply(
+        "I can't help with that directly, but I can help you book, check availability, prices, or location — or connect you to a human.\n\n" + help_text
+    )}
 
 " + help_text)}
 
