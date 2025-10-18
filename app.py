@@ -16,6 +16,14 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
 
+# --- Stripe & Base URL Config ---
+BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
+
+STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
+STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+STRIPE_CANCEL_URL  = os.getenv("STRIPE_CANCEL_URL")  or f"{BASE_URL}/payment/cancelled"
+
+
 # -------------------------
 # Environment / Config
 # -------------------------
