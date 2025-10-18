@@ -15,6 +15,32 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Redirect
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
+from fastapi.responses import PlainTextResponse
+from fastapi import Query
+
+@app.get("/dev/create-pay-link", response_class=PlainTextResponse)
+async def dev_create_pay_link(
+    to_email: str,
+    booking_id: str,
+    amount_cents: int,
+    description: str = "Booking payment – 10% online discount",
+):
+    """
+    Example:
+    /dev/create-pay-link?to_email=you@example.com&booking_id=ABC123&amount_cents=12000
+    """
+    try:
+        url = create_checkout_url(
+            amount_cents=amount_cents,
+            email=to_email,
+            description=description,
+            booking_id=booking_id,
+        )
+        return url
+    except Exception as e:
+        print(f"[Stripe] Error: {e}")
+        return PlainTextResponse("Failed to create Stripe session. Check logs.", status_code=500)
+
 
 # --- Stripe & Base URL Config ---
 BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
@@ -22,7 +48,31 @@ BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
 STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
 STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
 STRIPE_CANCEL_URL  = os.getenv("STRIPE_CANCEL_URL")  or f"{BASE_URL}/payment/cancelled"
+# --- Minimal Stripe helper (paste under the Stripe config block) ---
+def get_stripe():
+    import stripe  # imported only when used
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    return stripe
 
+def create_checkout_url(amount_cents: int, email: str, description: str, booking_id: str) -> str:
+    stripe = get_stripe()
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer_email=email,
+        line_items=[{
+            "quantity": 1,
+            "price_data": {
+                "currency": STRIPE_CURRENCY,
+                "unit_amount": amount_cents,  # pass the already-discounted amount if you want
+                "product_data": {"name": description, "metadata": {"booking_id": booking_id}},
+            },
+        }],
+        metadata={"booking_id": booking_id},
+        success_url=STRIPE_SUCCESS_URL,
+        cancel_url=STRIPE_CANCEL_URL,
+        allow_promotion_codes=False,
+    )
+    return session.url
 
 # -------------------------
 # Environment / Config
