@@ -65,13 +65,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Version endpoint to prove fresh deploys
-APP_VERSION = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-
-@app.get("/__version")
-def __version():
-    return {"version": APP_VERSION}
-
 # -------------------------
 # Models
 # -------------------------
@@ -300,11 +293,7 @@ async def protect(request: Request, call_next):
         return await call_next(request)
 
     # ---- admin login page & login POST are public ----
-    if (
-        path.startswith("/admin/login")
-        or path.endswith("/admin/login.html")
-        or path.startswith("/api/admin/login")  # ← added so fetch-based login isn't 401
-    ):
+    if path.startswith("/admin/login") or path.endswith("/admin/login.html"):
         return await call_next(request)
 
     # ---- all other /api/* require admin session ----
@@ -429,7 +418,19 @@ async def cancel_booking(booking_id: str, token: str):
 # ----- Admin-only APIs -----
 @app.get("/api/leads")
 async def list_leads():
-    return {"leads": read_all_leads()}  # (dead code removed below)
+    return {"leads": read_all_leads()}
+
+    for r in leads:
+        if (
+            r["booking_id"] != booking_id
+            and r["appointment_date"] == target["appointment_date"]
+            and r["appointment_time"] == target["appointment_time"]
+            and r["status"] == "confirmed"
+        ):
+            return JSONResponse({"ok": False, "message": "Time slot already confirmed for another booking."}, status_code=409)
+    update_booking_status(booking_id, "confirmed")
+    return {"ok": True, "message": "Booking confirmed"}
+
 
 # ----- Debug helpers -----
 @app.post("/api/debug/create_dummy")
@@ -511,10 +512,6 @@ async def chat(payload: Dict[str, str]):
         return {"reply": "Hey! I can check availability, pencil you in, or answer quick questions. Try: ‘availability today’ or ‘book me tomorrow at 10:00’."}
 
     low = msg.lower()
-
-    # Meta-ack for "Can I ask you something?"
-    if re.search(r"\b(can i|may i)\s+ask (you )?something\??", low):
-        return {"reply": "Of course — go ahead!"}
 
     # FAQ / small talk
     if any(w in low for w in ["hello", "hi ", "hey", "good morning", "good afternoon", "good evening"]):

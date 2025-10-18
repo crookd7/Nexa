@@ -18,14 +18,18 @@
     .pending{background:#fef3c7;color:#92400e}
     .confirmed{background:#dcfce7;color:#166534}
     .cancelled{background:#fee2e2;color:#991b1b}
+  
+    tr:nth-child(even){ background:#f9fafb; }
+    tr:hover{ background:#eef2ff; }
   </style>
 </head>
 <body>
   <h1>📋 Bookings (Admin) <a href="/admin/logout" class="btn cancel">Logout</a></h1>
+  <input id="search" class="input" placeholder="Search by name, email, phone, service or date..." style="max-width:420px;margin:8px 0 12px"/>
   <table id="leadsTable">
     <thead>
       <tr>
-        <th>Status</th><th>Name</th><th>Phone</th><th>Service</th>
+        <th>Status</th><th>Name</th><th>Email</th><th>Phone</th><th>Service</th>
         <th>Date</th><th>Time</th><th>Actions</th>
       </tr>
     </thead>
@@ -55,6 +59,7 @@
         tr.innerHTML = `
           <td>${statusCell}</td>
           <td>${l.name}</td>
+          <td>${l.email||''}</td>
           <td>${l.phone}</td>
           <td>${l.service}</td>
           <td>${l.appointment_date}</td>
@@ -81,6 +86,14 @@
       loadLeads();
     }
 
+    
+    document.getElementById('search').addEventListener('input', ()=>{ 
+    const q = document.getElementById('search').value.trim().toLowerCase();
+    Array.from(document.querySelectorAll('#leadsTable tbody tr')).forEach(tr => {
+      const text = tr.textContent.toLowerCase();
+      tr.style.display = text.includes(q) ? '' : 'none';
+    });
+ });
     loadLeads();
   </script>
 </body>
