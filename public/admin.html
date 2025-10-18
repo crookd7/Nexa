@@ -1,87 +1,136 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Admin – Nexa Bookings</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body{font-family:sans-serif;background:#f8fafc;margin:0;padding:20px}
-    h1{margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
-    table{border-collapse:collapse;width:100%;background:#fff}
-    th,td{border:1px solid #e2e8f0;padding:8px;text-align:left}
-    th{background:#f1f5f9}
-    tr:nth-child(even){background:#f9fafb}
-    .btn{padding:4px 8px;border-radius:4px;text-decoration:none;font-size:13px;cursor:pointer}
-    .confirm{background:#16a34a;color:#fff}
-    .cancel{background:#ef4444;color:#fff}
-    .pill{padding:2px 6px;border-radius:999px;font-size:12px}
-    .pending{background:#fef3c7;color:#92400e}
-    .confirmed{background:#dcfce7;color:#166534}
-    .cancelled{background:#fee2e2;color:#991b1b}
-  </style>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Admin</title>
+<style>
+  :root{--nav:#0b1630;--accent:#0a3d91}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f3f5f9;margin:0}
+  header{background:var(--nav);color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:5}
+  header h2{margin:0;font-size:20px}
+  .actions{display:flex;gap:8px;align-items:center}
+  .pill{padding:2px 8px;border-radius:999px;font-size:12px}
+  .pending{background:#e2e8f0;color:#0f172a}
+  .confirmed{background:#d1fae5;color:#065f46}
+  .cancelled{background:#fee2e2;color:#991b1b}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer}
+  .btn.alt{background:#64748b}
+  .btn.danger{background:#ef4444}
+  table{width:100%;border-collapse:collapse;background:#fff;margin:14px 0;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
+  th,td{padding:10px;border-bottom:1px solid #eef2f7;font-size:14px;text-align:left}
+  tr:hover td{background:#f8fafc}
+  .right{display:flex;gap:8px;align-items:center}
+  .x{width:32px;height:32px;background:#334155;color:#fff;border-radius:999px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .brand{display:flex;gap:10px;align-items:center}
+  .brand img{height:24px}
+  .bar{display:flex;justify-content:space-between;align-items:center;margin:10px 16px 0}
+  .filters{display:flex;gap:8px;align-items:center}
+  input[type="search"]{padding:8px;border:1px solid #cbd5e1;border-radius:8px}
+</style>
 </head>
 <body>
-  <h1>📋 Bookings (Admin) <a href="/admin/logout" class="btn cancel">Logout</a></h1>
-  <table id="leadsTable">
-    <thead>
-      <tr>
-        <th>Status</th><th>Name</th><th>Phone</th><th>Service</th>
-        <th>Date</th><th>Time</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <header>
+    <div class="brand">
+      <img id="brandLogo" alt="" style="display:none">
+      <h2 id="brandName">Admin</h2>
+    </div>
+    <div class="right">
+      <button class="btn alt" id="refreshBtn">Refresh</button>
+      <button class="btn alt" id="clearBtn">Clear</button>
+      <a class="btn danger" href="/admin/logout">Logout</a>
+      <div class="x" id="closePanel" title="Close">✕</div>
+    </div>
+  </header>
 
-  <script>
-    async function loadLeads(){
-      const res = await fetch('/api/leads');
-      if(!res.ok){ document.body.innerHTML = "<h2>Session expired. <a href='/admin/login.html'>Login again</a></h2>"; return; }
-      const data = await res.json();
-      const tbody = document.querySelector("#leadsTable tbody");
-      tbody.innerHTML = "";
+  <div class="bar">
+    <div class="filters">
+      <input type="search" id="q" placeholder="Search name/phone/service…">
+    </div>
+  </div>
 
-      data.leads.forEach(l => {
-        const tr = document.createElement("tr");
-        const statusCell = `<span class="pill ${l.status}">${l.status}</span>`;
-        let actions = "";
-        if(l.status === "pending"){
-          actions = `
-            <button class="btn confirm" onclick="confirmBooking('${l.booking_id}')">Confirm</button>
-            <button class="btn cancel" onclick="cancelBooking('${l.booking_id}')">Cancel</button>
-          `;
-        } else if(l.status === "confirmed"){
-          actions = `<button class="btn cancel" onclick="cancelBooking('${l.booking_id}')">Cancel</button>`;
-        }
-        tr.innerHTML = `
-          <td>${statusCell}</td>
-          <td>${l.name}</td>
-          <td>${l.phone}</td>
-          <td>${l.service}</td>
-          <td>${l.appointment_date}</td>
-          <td>${l.appointment_time}</td>
-          <td>${actions}</td>
-        `;
-        tbody.appendChild(tr);
-      });
+  <main style="padding:0 16px 16px">
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>Status</th><th>Name</th><th>Email</th><th>Phone</th>
+          <th>Service</th><th>Date</th><th>Time</th><th>Paid</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </main>
+
+<script>
+const $ = (id)=>document.getElementById(id);
+
+async function loadBrand(){
+  try{
+    const r = await fetch('/api/brand'); const b = await r.json();
+    if(b.name) $('brandName').textContent = b.name + ' — Admin';
+    if(b.logo){ const img=$('brandLogo'); img.src=b.logo; img.style.display='block'; }
+  }catch(e){}
+}
+
+function matchesQuery(l, q){
+  if(!q) return true;
+  q = q.toLowerCase();
+  return [l.name,l.email,l.phone,l.service,l.appointment_date,l.appointment_time].some(x=>(x||'').toLowerCase().includes(q));
+}
+
+async function loadLeads(){
+  const res = await fetch('/api/leads');
+  const j = await res.json();
+  const q = $('q').value.trim();
+  const tbody = document.querySelector('#tbl tbody');
+  tbody.innerHTML = '';
+  (j.leads||[]).filter(l=>matchesQuery(l,q)).forEach(l=>{
+    const tr = document.createElement('tr');
+    const s=`<span class="pill ${l.status}">${l.status}</span>`;
+    const paid = l.paid ? '✅ paid' : '—';
+    let actions = '';
+    if(l.status==='pending'){
+      actions += `<button class="btn" onclick="confirmBooking('${l.booking_id}')">Confirm</button> `;
+      actions += `<button class="btn danger" onclick="cancelBooking('${l.booking_id}')">Cancel</button> `;
+    }else if(l.status==='confirmed'){
+      actions += `<button class="btn danger" onclick="cancelBooking('${l.booking_id}')">Cancel</button> `;
     }
+    actions += `<button class="btn alt" onclick="togglePaid('${l.booking_id}', ${l.paid?'false':'true'})">${l.paid?'Unmark Paid':'Mark Paid'}</button>`;
+    tr.innerHTML = `
+      <td>${s}</td>
+      <td>${l.name||''}</td>
+      <td>${l.email||''}</td>
+      <td>${l.phone||''}</td>
+      <td>${l.service||''}</td>
+      <td>${l.appointment_date||''}</td>
+      <td>${l.appointment_time||''}</td>
+      <td>${paid}</td>
+      <td>${actions}</td>`;
+    tbody.appendChild(tr);
+  });
+}
 
-    async function confirmBooking(id){
-      if(!confirm("Confirm this booking?")) return;
-      const res = await fetch(`/api/confirm/${id}`, { method: "POST" });
-      const data = await res.json();
-      alert(data.message || "Updated");
-      loadLeads();
-    }
+async function confirmBooking(id){
+  const r = await fetch(`/api/confirm/${id}`, {method:'POST'});
+  const j = await r.json(); alert(j.message||'Updated'); loadLeads();
+}
+async function cancelBooking(id){
+  const r = await fetch(`/api/cancel/${id}`, {method:'POST'});
+  const j = await r.json(); alert(j.message||'Updated'); loadLeads();
+}
+async function togglePaid(id, makePaid){
+  const r = await fetch(`/api/paid/${id}?paid=${makePaid?'yes':'no'}`, {method:'POST'});
+  const j = await r.json(); alert(j.message||'Updated'); loadLeads();
+}
 
-    async function cancelBooking(id){
-      if(!confirm("Cancel this booking?")) return;
-      const res = await fetch(`/api/cancel/${id}`, { method: "POST" });
-      const data = await res.json();
-      alert(data.message || "Updated");
-      loadLeads();
-    }
+// buttons: Refresh + Clear
+$('refreshBtn').onclick = ()=> loadLeads();
+$('clearBtn').onclick = ()=> { $('q').value=''; loadLeads(); };
 
-    loadLeads();
-  </script>
+// Close button separated from Logout (no clash)
+$('closePanel').onclick = ()=> window.location.href = '/';
+
+loadBrand();
+loadLeads();
+</script>
 </body>
 </html>
