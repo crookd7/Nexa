@@ -41,6 +41,22 @@ async def dev_create_pay_link(
         print(f"[Stripe] Error: {e}")
         return PlainTextResponse("Failed to create Stripe session. Check logs.", status_code=500)
 
+@app.get("/test")
+async def test():
+    return {"ok": True}
+
+@app.get("/__routes", response_class=PlainTextResponse)
+async def list_routes():
+    lines = []
+    for r in app.router.routes:
+        try:
+            methods = ",".join(sorted(r.methods))
+        except Exception:
+            methods = ""
+        lines.append(f"{methods:8}  {getattr(r, 'path', getattr(r, 'path_format', ''))}")
+    return "\n".join(sorted(lines))
+
+
 
 # --- Stripe & Base URL Config ---
 BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
