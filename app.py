@@ -39,6 +39,7 @@ def get_stripe():
 
 def create_checkout_url(amount_cents: int, email: str, description: str, booking_id: str) -> str:
     stripe = get_stripe()
+    discounted = int(round(amount_cents * 0.9))  # 10% off
     session = stripe.checkout.Session.create(
         mode="payment",
         customer_email=email,
@@ -46,11 +47,14 @@ def create_checkout_url(amount_cents: int, email: str, description: str, booking
             "quantity": 1,
             "price_data": {
                 "currency": STRIPE_CURRENCY,
-                "unit_amount": amount_cents,
-                "product_data": {"name": description, "metadata": {"booking_id": booking_id}},
+                "unit_amount": discounted,  # use the discounted amount
+                "product_data": {
+                    "name": description,
+                    "metadata": {"booking_id": booking_id}
+                },
             },
         }],
-        metadata={"booking_id": booking_id},
+        metadata={"booking_id": booking_id, "original_amount": amount_cents, "discount_pct": 10},
         success_url=STRIPE_SUCCESS_URL,
         cancel_url=STRIPE_CANCEL_URL,
         allow_promotion_codes=False,
