@@ -1,4 +1,4 @@
-i# 1) IMPORTS
+1) IMPORTS
 import os
 import csv, json, uuid, hmac, hashlib, urllib.request, re
 from datetime import datetime, timedelta
