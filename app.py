@@ -11,11 +11,26 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
 
-# --- Stripe & Base URL Config + helpers (single source of truth) ---
-BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
+# --- Stripe & Base URL Config + helpers (defensive) ---
+from urllib.parse import urlparse
+
+BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "http://localhost:5000").strip().rstrip("/")
+
+# Optional overrides; if empty, we build from BASE_URL
+SUCC_ENV = (os.getenv("STRIPE_SUCCESS_URL") or "").strip()
+CANC_ENV = (os.getenv("STRIPE_CANCEL_URL") or "").strip()
+
 STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
-STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
-STRIPE_CANCEL_URL  = os.getenv("STRIPE_CANCEL_URL")  or f"{BASE_URL}/payment/cancelled"
+STRIPE_SUCCESS_URL = SUCC_ENV or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+STRIPE_CANCEL_URL  = CANC_ENV or f"{BASE_URL}/payment/cancelled"
+
+def _validate_urls():
+    for name, u in [("BASE_URL", BASE_URL), ("STRIPE_SUCCESS_URL", STRIPE_SUCCESS_URL), ("STRIPE_CANCEL_URL", STRIPE_CANCEL_URL)]:
+        p = urlparse(u)
+        assert p.scheme in ("http", "https") and p.netloc, f"{name} is not absolute: {u!r}"
+
+_validate_urls()  # fail fast with a clear message if something is off
+print("Stripe URLs:", repr(STRIPE_SUCCESS_URL), repr(STRIPE_CANCEL_URL))
 
 def get_stripe():
     import stripe  # lazy import so local dev won’t crash if not installed yet
