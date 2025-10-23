@@ -10,8 +10,92 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Redirect
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
-# (you had Query twice; one import is enough)
+from fastapi import APIRouter
 
+# 2) (Your Stripe/Base URL config + helpers go here)
+# --- Stripe & Base URL Config + helpers ---
+
+BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
+STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
+STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+STRIPE_CANCEL_URL  = os.getenv("STRIPE_CANCEL_URL")  or f"{BASE_URL}/payment/cancelled"
+
+def get_stripe():
+    import stripe  # lazy import so local dev won’t crash if not installed yet
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    return stripe
+
+def create_checkout_url(amount_cents: int, email: str, description: str, booking_id: str) -> str:
+    stripe = get_stripe()
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer_email=email,
+        line_items=[{
+            "quantity": 1,
+            "price_data": {
+                "currency": STRIPE_CURRENCY,
+                "unit_amount": amount_cents,
+                "product_data": {"name": description, "metadata": {"booking_id": booking_id}},
+            },
+        }],
+        metadata={"booking_id": booking_id},
+        success_url=STRIPE_SUCCESS_URL,
+        cancel_url=STRIPE_CANCEL_URL,
+        allow_promotion_codes=False,
+    )
+    return session.url
+
+# 3) CREATE THE APP (must exist before include_router)
+app = FastAPI()
+
+# 4) DEFINE ROUTER + ROUTES (your block is fine as-is)
+router = APIRouter()
+
+@router.get("/test")
+async def test():
+    return {"ok": True}
+
+@router.get("/__routes", response_class=PlainTextResponse)
+async def list_routes():
+    lines = []
+    for r in app.router.routes:
+        try:
+            methods = ",".join(sorted(r.methods))
+        except Exception:
+            methods = ""
+        lines.append(f"{methods:8}  {getattr(r, 'path', getattr(r, 'path_format', ''))}")
+    return "\n".join(sorted(lines))
+
+@router.get("/dev/create-pay-link", response_class=PlainTextResponse)
+async def dev_create_pay_link(
+    to_email: str,
+    booking_id: str,
+    amount_cents: int,
+    description: str = "Booking payment – 10% online discount",
+):
+    try:
+        url = create_checkout_url(
+            amount_cents=amount_cents,
+            email=to_email,
+            description=description,
+            booking_id=booking_id,
+        )
+        return url
+    except Exception as e:
+        print(f"[Stripe] Error: {e}")
+        return PlainTextResponse("Failed to create Stripe session. Check logs.", status_code=500)
+
+# 5) ATTACH ROUTER TO APP (now that 'app' exists')
+@router.get("/payment/success", response_class=PlainTextResponse)
+async def payment_success(session_id: str | None = None):
+    return "Payment successful. Thank you!"
+
+@router.get("/payment/cancelled", response_class=PlainTextResponse)
+async def payment_cancelled():
+    return "Payment cancelled. You can retry from the payment link."
+
+# finally register all routes on the FastAPI app
+app.include_router(router)   # no prefix -> paths are exactly as defined
 # 2) STRIPE CONFIG + HELPERS (your exact code)
 BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
 STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
