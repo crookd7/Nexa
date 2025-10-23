@@ -1,23 +1,52 @@
+i# 1) IMPORTS
 import os
-import csv
-import json
-import uuid
-import hmac
-import hashlib
-import urllib.request
-import re
+import csv, json, uuid, hmac, hashlib, urllib.request, re
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
-from fastapi.responses import PlainTextResponse
-from fastapi import Query
+# (you had Query twice; one import is enough)
 
+# 2) STRIPE CONFIG + HELPERS (your exact code)
+BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
+STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
+STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+STRIPE_CANCEL_URL  = os.getenv("STRIPE_CANCEL_URL")  or f"{BASE_URL}/payment/cancelled"
+
+def get_stripe():
+    import stripe
+    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+    return stripe
+
+def create_checkout_url(amount_cents: int, email: str, description: str, booking_id: str) -> str:
+    stripe = get_stripe()
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        customer_email=email,
+        line_items=[{
+            "quantity": 1,
+            "price_data": {
+                "currency": STRIPE_CURRENCY,
+                "unit_amount": amount_cents,
+                "product_data": {"name": description, "metadata": {"booking_id": booking_id}},
+            },
+        }],
+        metadata={"booking_id": booking_id},
+        success_url=STRIPE_SUCCESS_URL,
+        cancel_url=STRIPE_CANCEL_URL,
+        allow_promotion_codes=False,
+    )
+    return session.url
+
+# 3) CREATE THE APP (must be BEFORE any @app.get)
+app = FastAPI()
+
+# 4) ROUTES (now these see 'app')
 @app.get("/dev/create-pay-link", response_class=PlainTextResponse)
 async def dev_create_pay_link(
     to_email: str,
@@ -25,10 +54,6 @@ async def dev_create_pay_link(
     amount_cents: int,
     description: str = "Booking payment – 10% online discount",
 ):
-    """
-    Example:
-    /dev/create-pay-link?to_email=you@example.com&booking_id=ABC123&amount_cents=12000
-    """
     try:
         url = create_checkout_url(
             amount_cents=amount_cents,
@@ -55,40 +80,6 @@ async def list_routes():
             methods = ""
         lines.append(f"{methods:8}  {getattr(r, 'path', getattr(r, 'path_format', ''))}")
     return "\n".join(sorted(lines))
-
-
-
-# --- Stripe & Base URL Config ---
-BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
-
-STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
-STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
-STRIPE_CANCEL_URL  = os.getenv("STRIPE_CANCEL_URL")  or f"{BASE_URL}/payment/cancelled"
-# --- Minimal Stripe helper (paste under the Stripe config block) ---
-def get_stripe():
-    import stripe  # imported only when used
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-    return stripe
-
-def create_checkout_url(amount_cents: int, email: str, description: str, booking_id: str) -> str:
-    stripe = get_stripe()
-    session = stripe.checkout.Session.create(
-        mode="payment",
-        customer_email=email,
-        line_items=[{
-            "quantity": 1,
-            "price_data": {
-                "currency": STRIPE_CURRENCY,
-                "unit_amount": amount_cents,  # pass the already-discounted amount if you want
-                "product_data": {"name": description, "metadata": {"booking_id": booking_id}},
-            },
-        }],
-        metadata={"booking_id": booking_id},
-        success_url=STRIPE_SUCCESS_URL,
-        cancel_url=STRIPE_CANCEL_URL,
-        allow_promotion_codes=False,
-    )
-    return session.url
 
 # -------------------------
 # Environment / Config
