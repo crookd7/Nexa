@@ -10,11 +10,8 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Redirect
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from itsdangerous import URLSafeSerializer
-from fastapi import APIRouter
 
-# 2) (Your Stripe/Base URL config + helpers go here)
-# --- Stripe & Base URL Config + helpers ---
-
+# --- Stripe & Base URL Config + helpers (single source of truth) ---
 BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
 STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
 STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
@@ -44,126 +41,6 @@ def create_checkout_url(amount_cents: int, email: str, description: str, booking
         allow_promotion_codes=False,
     )
     return session.url
-
-# 3) CREATE THE APP (must exist before include_router)
-app = FastAPI()
-
-# 4) DEFINE ROUTER + ROUTES (your block is fine as-is)
-router = APIRouter()
-
-@router.get("/test")
-async def test():
-    return {"ok": True}
-
-@router.get("/__routes", response_class=PlainTextResponse)
-async def list_routes():
-    lines = []
-    for r in app.router.routes:
-        try:
-            methods = ",".join(sorted(r.methods))
-        except Exception:
-            methods = ""
-        lines.append(f"{methods:8}  {getattr(r, 'path', getattr(r, 'path_format', ''))}")
-    return "\n".join(sorted(lines))
-
-@router.get("/dev/create-pay-link", response_class=PlainTextResponse)
-async def dev_create_pay_link(
-    to_email: str,
-    booking_id: str,
-    amount_cents: int,
-    description: str = "Booking payment – 10% online discount",
-):
-    try:
-        url = create_checkout_url(
-            amount_cents=amount_cents,
-            email=to_email,
-            description=description,
-            booking_id=booking_id,
-        )
-        return url
-    except Exception as e:
-        print(f"[Stripe] Error: {e}")
-        return PlainTextResponse("Failed to create Stripe session. Check logs.", status_code=500)
-
-# 5) ATTACH ROUTER TO APP (now that 'app' exists')
-@router.get("/payment/success", response_class=PlainTextResponse)
-async def payment_success(session_id: str | None = None):
-    return "Payment successful. Thank you!"
-
-@router.get("/payment/cancelled", response_class=PlainTextResponse)
-async def payment_cancelled():
-    return "Payment cancelled. You can retry from the payment link."
-
-# finally register all routes on the FastAPI app
-app.include_router(router)   # no prefix -> paths are exactly as defined
-# 2) STRIPE CONFIG + HELPERS (your exact code)
-BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://localhost:5000")
-STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY") or "eur").lower()
-STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL") or f"{BASE_URL}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
-STRIPE_CANCEL_URL  = os.getenv("STRIPE_CANCEL_URL")  or f"{BASE_URL}/payment/cancelled"
-
-def get_stripe():
-    import stripe
-    stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-    return stripe
-
-def create_checkout_url(amount_cents: int, email: str, description: str, booking_id: str) -> str:
-    stripe = get_stripe()
-    session = stripe.checkout.Session.create(
-        mode="payment",
-        customer_email=email,
-        line_items=[{
-            "quantity": 1,
-            "price_data": {
-                "currency": STRIPE_CURRENCY,
-                "unit_amount": amount_cents,
-                "product_data": {"name": description, "metadata": {"booking_id": booking_id}},
-            },
-        }],
-        metadata={"booking_id": booking_id},
-        success_url=STRIPE_SUCCESS_URL,
-        cancel_url=STRIPE_CANCEL_URL,
-        allow_promotion_codes=False,
-    )
-    return session.url
-
-# 3) CREATE THE APP (must be BEFORE any @app.get)
-app = FastAPI()
-
-# 4) ROUTES (now these see 'app')
-@app.get("/dev/create-pay-link", response_class=PlainTextResponse)
-async def dev_create_pay_link(
-    to_email: str,
-    booking_id: str,
-    amount_cents: int,
-    description: str = "Booking payment – 10% online discount",
-):
-    try:
-        url = create_checkout_url(
-            amount_cents=amount_cents,
-            email=to_email,
-            description=description,
-            booking_id=booking_id,
-        )
-        return url
-    except Exception as e:
-        print(f"[Stripe] Error: {e}")
-        return PlainTextResponse("Failed to create Stripe session. Check logs.", status_code=500)
-
-@app.get("/test")
-async def test():
-    return {"ok": True}
-
-@app.get("/__routes", response_class=PlainTextResponse)
-async def list_routes():
-    lines = []
-    for r in app.router.routes:
-        try:
-            methods = ",".join(sorted(r.methods))
-        except Exception:
-            methods = ""
-        lines.append(f"{methods:8}  {getattr(r, 'path', getattr(r, 'path_format', ''))}")
-    return "\n".join(sorted(lines))
 
 # -------------------------
 # Environment / Config
@@ -569,18 +446,6 @@ async def cancel_booking(booking_id: str, token: str):
 async def list_leads():
     return {"leads": read_all_leads()}
 
-    for r in leads:
-        if (
-            r["booking_id"] != booking_id
-            and r["appointment_date"] == target["appointment_date"]
-            and r["appointment_time"] == target["appointment_time"]
-            and r["status"] == "confirmed"
-        ):
-            return JSONResponse({"ok": False, "message": "Time slot already confirmed for another booking."}, status_code=409)
-    update_booking_status(booking_id, "confirmed")
-    return {"ok": True, "message": "Booking confirmed"}
-
-
 # ----- Debug helpers -----
 @app.post("/api/debug/create_dummy")
 async def create_dummy():
@@ -737,7 +602,7 @@ async def chat(payload: Dict[str, str]):
         confirm_url = f"{base_url}/confirm/{booking_id}?token={confirm_token}"
         cancel_url = f"{base_url}/cancel/{booking_id}?token={cancel_token}"
         subject, text, html = build_owner_email(booking_id, lead, confirm_url, cancel_url)
-        send_via_brevo_api(subject, text, html)
+        send_via_brevo_api(subject, txt=text, html=html)
 
         base = f"Done! I created a pending booking for {name} on {date_str} at {time_str} for ‘{service}’. The owner will confirm shortly."
         return {"reply": _nice_reply(base)}
@@ -803,7 +668,6 @@ async def api_confirm_booking(booking_id: str):
         print("Email confirm send failed:", e)
 
     return {"ok": True, "message": "Booking confirmed"}
-
 
 
 @app.post("/api/cancel/{booking_id}")
@@ -878,3 +742,37 @@ async def admin_logout():
     resp = RedirectResponse(url="/admin/login.html", status_code=302)
     resp.delete_cookie("admin_session", path="/")
     return resp
+
+# -------------------------
+# Stripe dev helpers (attach to final app)
+# -------------------------
+@app.get("/test", response_class=PlainTextResponse)
+async def test():
+    return "ok"
+
+@app.get("/payment/success", response_class=PlainTextResponse)
+async def payment_success(session_id: str | None = None):
+    return "Payment successful. Thank you!"
+
+@app.get("/payment/cancelled", response_class=PlainTextResponse)
+async def payment_cancelled():
+    return "Payment cancelled. You can retry from the payment link."
+
+@app.get("/dev/create-pay-link", response_class=PlainTextResponse)
+async def dev_create_pay_link(
+    to_email: str,
+    booking_id: str,
+    amount_cents: int,
+    description: str = "Booking payment – 10% online discount",
+):
+    try:
+        url = create_checkout_url(
+            amount_cents=amount_cents,
+            email=to_email,
+            description=description,
+            booking_id=booking_id,
+        )
+        return url
+    except Exception as e:
+        print(f"[Stripe] Error: {e}")
+        return PlainTextResponse("Failed to create Stripe session. Check logs.", status_code=500)
